@@ -4,7 +4,8 @@ AI Investigation Engine is a FastAPI service that converts an investigation
 query into a structured research plan. It supports both a deterministic planner
 and a provider-independent AI planning flow. The offline `mock` provider remains
 the default; an opt-in Google Gemini adapter can make real model calls when
-explicitly configured with an API key and model name.
+explicitly configured with an API key and model name. A separate opt-in Gemini
+Google Search grounding path returns normalized, citation-backed web sources.
 
 ## Current features
 
@@ -24,13 +25,17 @@ explicitly configured with an API key and model name.
 - Labeled deterministic fallback for provider failures or invalid model output.
 - Provider-independent asynchronous search abstraction.
 - Deterministic mock search data on reserved example domains.
+- Gemini Google Search grounding through the official `google-genai` SDK.
+- Citation-annotation-only URL extraction, normalization, and deduplication.
+- Grounded source provenance and source-quality heuristic assessment.
 - Explainable source-quality scoring with explicit caveats.
 - Provenance-preserving evidence extraction and stance classification.
 - Structured evidence summaries without final truth verdicts.
 - Pytest and HTTP-level ASGI endpoint tests.
 
-Gemini is the only optional external integration. No external search provider,
-retrieval system, database, agent, or persistence layer is connected.
+Gemini planning and Gemini Google Search grounding are the only optional
+external integrations. No third-party search SDK, autonomous crawler, retrieval
+system, database, agent, or persistence layer is connected.
 
 ## Architecture
 
@@ -40,6 +45,7 @@ flowchart LR
 
     Routes -->|/plan| Deterministic[InvestigationPlanner]
     Routes -->|/ai-plan| AIService[AIInvestigationService]
+    Routes -->|/research/web| WebService[WebResearchService]
 
     AIService --> Factory[LLM provider factory]
     Factory --> Mock[MockLLMProvider]
@@ -54,6 +60,12 @@ flowchart LR
     Validation --> Response[Typed AIInvestigationResponse]
 
     AIService -. provider failure, timeout, or invalid schema .-> Deterministic
+
+    WebService --> SearchFactory[Search provider factory]
+    SearchFactory --> Grounded[GeminiGroundedSearchProvider]
+    Grounded --> GoogleSearch[Gemini Google Search tool]
+    GoogleSearch --> Citations[URL citation annotations]
+    Citations --> Sources[Normalized, credibility-scored Sources]
 ```
 
 ### Deterministic and AI-provider flows
@@ -138,13 +150,18 @@ information, and reference or citation metadata. Its `high`, `moderate`, `low`,
 and `unknown` levels estimate source quality only. They do not prove that a
 statement is accurate, complete, unbiased, or true.
 
-### Future research adapters
+### Grounded web research
 
-Real search providers can later implement `SearchProvider` without changing the
-research service. A future LLM evidence extractor can implement
-`EvidenceExtractor`, but it must preserve the same source-bound provenance
-contract and validate structured output. No search SDK, scraper, or external
-evidence model is currently connected.
+`GeminiGroundedSearchProvider` implements the vendor-neutral `SearchProvider`
+contract with Gemini's built-in Google Search tool. The adapter accepts URLs
+only from `url_citation` annotations returned by grounding metadata. URLs in
+model prose are ignored. Valid URLs are normalized, stripped of common tracking
+parameters and fragments, deduplicated, capped by `max_results`, and converted
+to typed `Source` records.
+
+The web path stops after source normalization and credibility assessment. It
+does not run the mock evidence extractor or make a truth determination. A future
+real evidence extractor must preserve the same source-bound provenance contract.
 
 ## Project structure
 
@@ -212,8 +229,10 @@ AI-Investigation-Engine/
 └── requirements.txt
 ```
 
-Gemini-specific additions are `app/ai/gemini_provider.py`,
-`tests/test_gemini_provider.py`, and `scripts/test_gemini.py`.
+Gemini-specific additions include `app/ai/gemini_provider.py`,
+`app/research/search/gemini_grounded_provider.py`,
+`app/services/web_research_service.py`, and the guarded scripts under
+`scripts/`.
 
 ## Run locally
 
@@ -234,13 +253,16 @@ The application reads these optional environment variables:
 | Variable | Default |
 | --- | --- |
 | `APP_NAME` | `AI Investigation Engine` |
-| `APP_VERSION` | `0.5.0` |
+| `APP_VERSION` | `0.6.0` |
 | `ENVIRONMENT` | `development` |
 | `DEBUG` | `false` |
 | `LLM_PROVIDER` | `mock` |
 | `LLM_MODEL` | `mock-investigator` |
 | `LLM_TIMEOUT_SECONDS` | `60` |
 | `GEMINI_API_KEY` | unset |
+| `SEARCH_PROVIDER` | `mock` |
+| `SEARCH_MODEL` | `gemini-3.6-flash` |
+| `SEARCH_MAX_RESULTS` | `5` |
 
 The application loads a project-root `.env` file when present. Explicit process
 environment variables take precedence. Set `APP_ENV_FILE` to another path to
@@ -266,6 +288,12 @@ $env:LLM_MODEL="gemini-3.6-flash"
 python -m scripts.test_gemini
 ```
 
+Run one real grounded web-research request:
+
+```powershell
+python -m scripts.test_web_research
+```
+
 ## API endpoints
 
 | Method | Path | Purpose |
@@ -275,6 +303,7 @@ python -m scripts.test_gemini
 | `POST` | `/api/v1/investigations/plan` | Generate a deterministic investigation plan |
 | `POST` | `/api/v1/investigations/ai-plan` | Generate a provider-backed AI-style plan |
 | `POST` | `/api/v1/research/mock` | Run the offline mock research/evidence pipeline |
+| `POST` | `/api/v1/research/web` | Run real Gemini Google Search grounding and normalize cited sources |
 | `POST` | `/api/v1/evidence/summary` | Summarize evidence counts and unresolved conflicts |
 
 ### Planning request
@@ -400,6 +429,30 @@ Send this body to `POST /api/v1/investigations/ai-plan`. The response keeps the
 For the default `mock` provider, repeated requests with the same query and depth
 produce the same response.
 
+### Grounded web research request
+
+```json
+{
+  "query": "What are the latest official developments in long-duration energy storage?",
+  "max_results": 5
+}
+```
+
+Send this body to `POST /api/v1/research/web`. The response contains the query,
+`provider_used`, `model_used`, normalized and credibility-scored `sources`, a
+`grounded_summary`, citation annotations and search-query metadata, and
+warnings. A citation includes its normalized source URL, source title, optional
+cited text and offsets, and the normalized source ID.
+
+If Gemini returns no usable `url_citation` metadata, `sources` and citations are
+empty and the response includes an explicit warning. The service never derives
+a source URL from generated prose.
+
+Gemini 3 Google Search grounding is billed per search query executed by the
+model, and one API request can execute multiple billable queries. Review the
+[official grounding pricing guidance](https://ai.google.dev/gemini-api/docs/google-search#pricing)
+and project quota before enabling the web endpoint.
+
 ### Mock research request
 
 ```json
@@ -466,13 +519,18 @@ python -m compileall app
 
 ## Current limitations
 
-- Gemini planning is opt-in and may incur provider usage charges.
+- Gemini planning and grounded web research are opt-in and may incur usage
+  charges or quota consumption.
 - The deterministic mock remains the default for offline development and tests.
-- Search results use deterministic mock records on reserved example domains.
+- The mock endpoint still uses deterministic records on reserved domains.
+- The web endpoint depends on Gemini returning usable citation annotations.
+- Grounding metadata generally does not provide author or publication-date
+  metadata, which lowers heuristic source-quality scores.
 - Evidence extraction uses supplied mock snippets, not fetched page content.
 - Category detection uses local pattern matching rather than a trained model.
 - Prompt templates are sent externally only when `LLM_PROVIDER=gemini`.
-- No web search, source retrieval, RAG, embeddings, or vector database.
+- No autonomous crawling, page-content fetching, RAG, embeddings, or vector
+  database.
 - No persistence, authentication, background jobs, or audit history.
 - No live external evidence collection, truth verification, or report synthesis.
 
@@ -480,7 +538,7 @@ python -m compileall app
 
 1. Expand offline evaluation fixtures for planner and evidence quality.
 2. Add evaluation and observability for opt-in LLM adapters.
-3. Add opt-in real search adapters behind `SearchProvider`.
+3. Add grounded-search evaluation fixtures and provider observability.
 4. Add a structured real-model extractor behind `EvidenceExtractor`.
 5. Add resilient provider telemetry without logging sensitive content.
 6. Add persistence and asynchronous investigation jobs.

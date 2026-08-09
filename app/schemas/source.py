@@ -29,6 +29,10 @@ class SourceMetadata(StrictModel):
     content_type: str | None = None
     citation_count: int | None = Field(default=None, ge=0)
     has_references: bool | None = None
+    retrieval_provider: str | None = None
+    retrieval_model: str | None = None
+    retrieval_query: str | None = None
+    grounding_citation_count: int | None = Field(default=None, ge=0)
 
 
 class SourceCredibility(StrictModel):

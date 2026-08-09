@@ -79,7 +79,7 @@ class ResearchService:
                 "source-quality ratings."
             )
         if not assessed_sources:
-            warnings.append("No mock search results matched the request.")
+            warnings.append("No search results matched the request.")
 
         return ResearchResult(
             investigation_query=plan.query,

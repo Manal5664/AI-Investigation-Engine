@@ -59,7 +59,7 @@ def _read_optional_secret(name: str) -> str | None:
 @dataclass(frozen=True, slots=True)
 class Settings:
     APP_NAME: str = os.getenv("APP_NAME", "AI Investigation Engine")
-    APP_VERSION: str = os.getenv("APP_VERSION", "0.5.0")
+    APP_VERSION: str = os.getenv("APP_VERSION", "0.6.0")
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     DEBUG: bool = _read_bool("DEBUG")
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "mock")
@@ -72,6 +72,9 @@ class Settings:
         default_factory=lambda: _read_optional_secret("GEMINI_API_KEY"),
         repr=False,
     )
+    SEARCH_PROVIDER: str = os.getenv("SEARCH_PROVIDER", "mock")
+    SEARCH_MODEL: str = os.getenv("SEARCH_MODEL", "gemini-3.6-flash")
+    SEARCH_MAX_RESULTS: int = _read_positive_int("SEARCH_MAX_RESULTS", 5)
 
 
 settings = Settings()
