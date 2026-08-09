@@ -12,8 +12,8 @@ from app.core.exceptions import (
 app = FastAPI(
     title=settings.APP_NAME,
     description=(
-        "A deterministic investigation planning service designed for future "
-        "LLM integration."
+        "An investigation planning and evidence service with deterministic "
+        "and provider-backed LLM flows."
     ),
     version=settings.APP_VERSION,
     debug=settings.DEBUG,

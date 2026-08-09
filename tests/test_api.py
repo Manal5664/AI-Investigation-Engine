@@ -152,3 +152,7 @@ def test_ai_plan_endpoint() -> None:
     assert payload["plan"]["assumptions"]
     assert payload["plan"]["expected_evidence_types"]
     assert payload["plan"]["potential_biases"]
+    assert payload["provider_used"] == "mock"
+    assert payload["model_used"] == "mock-investigator"
+    assert payload["fallback_used"] is False
+    assert payload["provider_error"] is None

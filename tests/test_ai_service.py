@@ -63,6 +63,10 @@ def test_ai_planning_service_returns_validated_plan() -> None:
     assert isinstance(response.plan, AIInvestigationPlan)
     assert response.plan.depth is InvestigationDepth.DEEP
     assert len(response.plan.sub_questions) == 8
+    assert response.provider_used == "mock"
+    assert response.model_used == "mock-investigator"
+    assert response.fallback_used is False
+    assert response.provider_error is None
 
 
 def test_deterministic_fallback_on_provider_error() -> None:
@@ -76,6 +80,10 @@ def test_deterministic_fallback_on_provider_error() -> None:
 
     assert type(response.plan) is InvestigationPlan
     assert len(response.plan.sub_questions) == 3
+    assert response.provider_used == "deterministic"
+    assert response.model_used == "deterministic-investigation-planner"
+    assert response.fallback_used is True
+    assert response.provider_error == "Simulated provider failure"
 
 
 def test_deterministic_fallback_on_schema_validation_error() -> None:
@@ -88,3 +96,6 @@ def test_deterministic_fallback_on_schema_validation_error() -> None:
 
     assert type(response.plan) is InvestigationPlan
     assert len(response.plan.sub_questions) == 5
+    assert response.provider_used == "deterministic"
+    assert response.fallback_used is True
+    assert response.provider_error is not None

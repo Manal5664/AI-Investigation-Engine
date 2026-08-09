@@ -26,3 +26,6 @@ class LLMProvider(ABC):
         depth: InvestigationDepth,
     ) -> dict[str, Any]:
         """Generate a JSON-compatible structured investigation plan."""
+
+    async def aclose(self) -> None:
+        """Release provider resources when the adapter owns any."""

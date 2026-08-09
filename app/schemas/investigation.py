@@ -98,3 +98,10 @@ class AIInvestigationPlan(InvestigationPlan):
 class InvestigationResponse(StrictModel):
     status: Literal["investigation_planned"]
     plan: AIInvestigationPlan | InvestigationPlan
+
+
+class AIInvestigationResponse(InvestigationResponse):
+    provider_used: str = Field(min_length=1)
+    model_used: str = Field(min_length=1)
+    fallback_used: bool
+    provider_error: str | None = None

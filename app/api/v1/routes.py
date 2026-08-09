@@ -5,6 +5,7 @@ from app.api.v1.research_routes import router as research_router
 from app.core.config import settings
 from app.schemas.common import ErrorResponse
 from app.schemas.investigation import (
+    AIInvestigationResponse,
     InvestigationRequest,
     InvestigationResponse,
 )
@@ -41,7 +42,7 @@ def create_investigation_plan(
 
 @router.post(
     "/investigations/ai-plan",
-    response_model=InvestigationResponse,
+    response_model=AIInvestigationResponse,
     responses={
         422: {
             "model": ErrorResponse,
@@ -55,12 +56,16 @@ def create_investigation_plan(
 )
 async def create_ai_investigation_plan(
     request: InvestigationRequest,
-) -> InvestigationResponse:
-    service = AIInvestigationService(
-        provider=create_llm_provider(),
-        timeout_seconds=settings.LLM_TIMEOUT_SECONDS,
-    )
-    return await service.plan_investigation(request)
+) -> AIInvestigationResponse:
+    provider = create_llm_provider()
+    try:
+        service = AIInvestigationService(
+            provider=provider,
+            timeout_seconds=settings.LLM_TIMEOUT_SECONDS,
+        )
+        return await service.plan_investigation(request)
+    finally:
+        await provider.aclose()
 
 
 router.include_router(research_router)

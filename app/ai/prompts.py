@@ -16,8 +16,18 @@ Do not make unsupported conclusions. Represent uncertainty explicitly.
 def build_investigation_planning_prompt(
     query: str,
     depth: InvestigationDepth,
+    *,
+    include_schema: bool = True,
 ) -> str:
-    schema = json.dumps(AIInvestigationPlan.model_json_schema(), indent=2)
+    schema_section = ""
+    if include_schema:
+        schema = json.dumps(AIInvestigationPlan.model_json_schema(), indent=2)
+        schema_section = f"""
+
+        Required JSON Schema:
+        {schema}
+        """
+
     return dedent(
         f"""
         You are preparing a balanced investigation plan.
@@ -30,9 +40,7 @@ def build_investigation_planning_prompt(
         types, and potential biases. Do not answer the investigation itself.
 
         {_OUTPUT_GUARDRAILS}
-
-        Required JSON Schema:
-        {schema}
+        {schema_section}
         """
     ).strip()
 

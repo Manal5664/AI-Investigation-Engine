@@ -2,9 +2,9 @@
 
 AI Investigation Engine is a FastAPI service that converts an investigation
 query into a structured research plan. It supports both a deterministic planner
-and a provider-independent, AI-style planning flow. The current AI provider is
-a local deterministic mock, so development requires no API key, internet
-connection, or paid model.
+and a provider-independent AI planning flow. The offline `mock` provider remains
+the default; an opt-in Google Gemini adapter can make real model calls when
+explicitly configured with an API key and model name.
 
 ## Current features
 
@@ -18,8 +18,10 @@ connection, or paid model.
 - Environment-backed application settings without `pydantic-settings`.
 - Vendor-neutral asynchronous `LLMProvider` abstraction.
 - Local `MockLLMProvider` with schema-validated output.
-- Reusable prompt builders for future provider adapters.
-- Deterministic fallback for provider failures or invalid model output.
+- Official `google-genai` adapter with async structured JSON generation.
+- Reusable prompt builders shared by mock and Gemini providers.
+- Explicit provider/model/fallback metadata on AI planning responses.
+- Labeled deterministic fallback for provider failures or invalid model output.
 - Provider-independent asynchronous search abstraction.
 - Deterministic mock search data on reserved example domains.
 - Explainable source-quality scoring with explicit caveats.
@@ -27,8 +29,8 @@ connection, or paid model.
 - Structured evidence summaries without final truth verdicts.
 - Pytest and HTTP-level ASGI endpoint tests.
 
-No external AI provider, retrieval system, search engine, database, agent, or
-persistence layer is connected.
+Gemini is the only optional external integration. No external search provider,
+retrieval system, database, agent, or persistence layer is connected.
 
 ## Architecture
 
@@ -41,12 +43,15 @@ flowchart LR
 
     AIService --> Factory[LLM provider factory]
     Factory --> Mock[MockLLMProvider]
+    Factory --> Gemini[GeminiLLMProvider]
     Mock --> Prompts[Reusable prompt builders]
+    Gemini --> Prompts
     Mock --> Deterministic
 
     Mock --> Raw[JSON-compatible provider output]
+    Gemini --> Raw
     Raw --> Validation[Pydantic AIInvestigationPlan validation]
-    Validation --> Response[Typed InvestigationResponse]
+    Validation --> Response[Typed AIInvestigationResponse]
 
     AIService -. provider failure, timeout, or invalid schema .-> Deterministic
 ```
@@ -58,9 +63,11 @@ flowchart LR
 | Deterministic | `POST /api/v1/investigations/plan` | Local `InvestigationPlanner` | Stable baseline and fallback |
 | AI-style | `POST /api/v1/investigations/ai-plan` | Configured `LLMProvider` through `AIInvestigationService` | Provider-independent integration boundary |
 
-Both flows return the same response envelope. The AI-style flow adds a research
-objective, explicit assumptions, expected evidence types, and potential biases.
-All provider output is validated before it reaches the API response.
+Both flows preserve the `status` and `plan` envelope. The AI-style response also
+identifies `provider_used`, `model_used`, and `fallback_used`. Its plan adds a
+research objective, explicit assumptions, expected evidence types, and
+potential biases. All provider output is validated before it reaches the API
+response.
 
 ### Current mock provider
 
@@ -69,12 +76,25 @@ real providers. It builds the future planning prompt, generates realistic
 structured data locally, and returns JSON-compatible output. Its behavior is
 deterministic and uses no network calls, API keys, model SDKs, or usage charges.
 
+### Optional Gemini provider
+
+`GeminiLLMProvider` uses the official `google-genai` SDK and the same
+vendor-neutral `LLMProvider` contract. It sends the existing planning prompt
+through the SDK's asynchronous API, requests `application/json` with the
+`AIInvestigationPlan` JSON schema, and validates the returned JSON with
+Pydantic. Empty, malformed, schema-invalid, timed-out, and provider-error
+responses are never treated as successful AI output.
+
+When fallback is needed, the API reports `provider_used: "deterministic"` and
+`fallback_used: true`, along with a sanitized `provider_error`. It does not label
+the locally generated plan as Gemini output.
+
 ### Future provider adapters
 
-Future OpenAI, Gemini, or Anthropic adapters should implement only
-`LLMProvider` and translate provider-specific responses into the neutral
-structured output contract. Vendor SDK objects, authentication, and error types
-must remain inside their adapter modules. No real adapter is currently present.
+Future OpenAI or Anthropic adapters should implement only `LLMProvider` and
+translate provider-specific responses into the neutral structured output
+contract. Vendor SDK objects, authentication, and error types remain inside
+their adapter modules.
 
 ## Research and evidence pipeline
 
@@ -192,6 +212,9 @@ AI-Investigation-Engine/
 └── requirements.txt
 ```
 
+Gemini-specific additions are `app/ai/gemini_provider.py`,
+`tests/test_gemini_provider.py`, and `scripts/test_gemini.py`.
+
 ## Run locally
 
 Activate the existing virtual environment, then start the API from the project
@@ -211,12 +234,37 @@ The application reads these optional environment variables:
 | Variable | Default |
 | --- | --- |
 | `APP_NAME` | `AI Investigation Engine` |
-| `APP_VERSION` | `0.4.0` |
+| `APP_VERSION` | `0.5.0` |
 | `ENVIRONMENT` | `development` |
 | `DEBUG` | `false` |
 | `LLM_PROVIDER` | `mock` |
 | `LLM_MODEL` | `mock-investigator` |
 | `LLM_TIMEOUT_SECONDS` | `60` |
+| `GEMINI_API_KEY` | unset |
+
+The application loads a project-root `.env` file when present. Explicit process
+environment variables take precedence. Set `APP_ENV_FILE` to another path to
+load a different file, or to an empty value to disable file loading. Keep the
+offline defaults for normal development. To enable Gemini in the current
+PowerShell process:
+
+```powershell
+$env:LLM_PROVIDER="gemini"
+$env:LLM_MODEL="gemini-3.6-flash"
+$env:GEMINI_API_KEY="<your-api-key>"
+python -m uvicorn app.main:app --reload
+```
+
+The model identifier is configuration, not provider code. Re-check Google's
+model lifecycle documentation before production deployment.
+
+Run the optional one-request integration check only when the key is present:
+
+```powershell
+$env:GEMINI_API_KEY="<your-api-key>"
+$env:LLM_MODEL="gemini-3.6-flash"
+python -m scripts.test_gemini
+```
 
 ## API endpoints
 
@@ -339,13 +387,15 @@ characters. Additional request fields are rejected. Depth must be `quick`,
 ```
 
 Send this body to `POST /api/v1/investigations/ai-plan`. The response keeps the
-same `status` and `plan` envelope and includes:
+`status` and `plan` envelope and includes:
 
 - `research_objective` with explicit success criteria.
 - `assumptions` that require validation.
 - Structured `research_angles` and prioritized `sub_questions`.
 - `expected_evidence_types`.
 - `potential_biases` with mitigations.
+- `provider_used`, `model_used`, and `fallback_used` metadata.
+- An optional sanitized `provider_error` when fallback was required.
 
 For the default `mock` provider, repeated requests with the same query and depth
 produce the same response.
@@ -410,25 +460,26 @@ python -m compileall app
 
 - Never commit a real `.env` file or credentials.
 - `.env.example` contains empty placeholders only.
-- Supply future API keys through environment variables or a secret manager.
+- Supply `GEMINI_API_KEY` through the environment or a secret manager.
 - Do not log API keys, authorization headers, or raw provider credentials.
-- Keep provider authentication isolated inside future adapter modules.
+- Provider authentication remains isolated inside its adapter module.
 
 ## Current limitations
 
-- The configured AI provider is currently a deterministic mock, not a real LLM.
+- Gemini planning is opt-in and may incur provider usage charges.
+- The deterministic mock remains the default for offline development and tests.
 - Search results use deterministic mock records on reserved example domains.
 - Evidence extraction uses supplied mock snippets, not fetched page content.
 - Category detection uses local pattern matching rather than a trained model.
-- Prompt templates are prepared but are not sent to any external service.
+- Prompt templates are sent externally only when `LLM_PROVIDER=gemini`.
 - No web search, source retrieval, RAG, embeddings, or vector database.
 - No persistence, authentication, background jobs, or audit history.
-- No evidence collection, verification, scoring, or report synthesis.
+- No live external evidence collection, truth verification, or report synthesis.
 
 ## Planned roadmap
 
 1. Expand offline evaluation fixtures for planner and evidence quality.
-2. Add opt-in real LLM adapters behind `LLMProvider`.
+2. Add evaluation and observability for opt-in LLM adapters.
 3. Add opt-in real search adapters behind `SearchProvider`.
 4. Add a structured real-model extractor behind `EvidenceExtractor`.
 5. Add resilient provider telemetry without logging sensitive content.

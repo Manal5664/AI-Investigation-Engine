@@ -1,5 +1,34 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _load_env_file(path: Path | None = None) -> None:
+    """Load local settings without overriding explicit environment values."""
+    env_file = path
+    if env_file is None:
+        configured_path = os.getenv("APP_ENV_FILE")
+        if configured_path is not None:
+            if not configured_path.strip():
+                return
+            configured_file = Path(configured_path).expanduser()
+            env_file = (
+                configured_file
+                if configured_file.is_absolute()
+                else PROJECT_ROOT / configured_file
+            )
+        else:
+            env_file = PROJECT_ROOT / ".env"
+
+    load_dotenv(dotenv_path=env_file, override=False)
+
+
+_load_env_file()
 
 
 def _read_bool(name: str, default: bool = False) -> bool:
@@ -19,10 +48,18 @@ def _read_positive_int(name: str, default: int) -> int:
     return value
 
 
+def _read_optional_secret(name: str) -> str | None:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return None
+    value = raw_value.strip()
+    return value or None
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     APP_NAME: str = os.getenv("APP_NAME", "AI Investigation Engine")
-    APP_VERSION: str = os.getenv("APP_VERSION", "0.4.0")
+    APP_VERSION: str = os.getenv("APP_VERSION", "0.5.0")
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     DEBUG: bool = _read_bool("DEBUG")
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "mock")
@@ -30,6 +67,10 @@ class Settings:
     LLM_TIMEOUT_SECONDS: int = _read_positive_int(
         "LLM_TIMEOUT_SECONDS",
         60,
+    )
+    GEMINI_API_KEY: str | None = field(
+        default_factory=lambda: _read_optional_secret("GEMINI_API_KEY"),
+        repr=False,
     )
 
 
