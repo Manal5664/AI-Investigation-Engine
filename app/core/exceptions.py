@@ -21,6 +21,15 @@ class ApplicationError(Exception):
         self.details = details or []
 
 
+class ApplicationConfigurationError(ApplicationError):
+    def __init__(self, message: str) -> None:
+        super().__init__(
+            message,
+            code="application_configuration_error",
+            status_code=500,
+        )
+
+
 async def application_error_handler(
     request: Request,
     exc: ApplicationError,

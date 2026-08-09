@@ -2,6 +2,8 @@ import asyncio
 import json
 from typing import Any
 
+import httpx
+
 from app.main import app
 
 
@@ -122,3 +124,31 @@ def test_invalid_depth_returns_clear_422() -> None:
     assert status == 422
     assert body["code"] == "validation_error"
     assert body["details"][0]["field"] == "depth"
+
+
+def test_ai_plan_endpoint() -> None:
+    async def make_request() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            return await client.post(
+                "/api/v1/investigations/ai-plan",
+                json={
+                    "query": "Research renewable energy storage",
+                    "depth": "standard",
+                },
+            )
+
+    response = asyncio.run(make_request())
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["status"] == "investigation_planned"
+    assert payload["plan"]["depth"] == "standard"
+    assert len(payload["plan"]["sub_questions"]) == 5
+    assert payload["plan"]["research_objective"]["objective"]
+    assert payload["plan"]["assumptions"]
+    assert payload["plan"]["expected_evidence_types"]
+    assert payload["plan"]["potential_biases"]

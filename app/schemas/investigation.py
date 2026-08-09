@@ -65,6 +65,36 @@ class InvestigationPlan(StrictModel):
     sub_questions: list[InvestigationSubQuestion] = Field(min_length=1)
 
 
+class AIResearchObjective(StrictModel):
+    objective: str = Field(min_length=1)
+    success_criteria: list[str] = Field(min_length=1)
+
+
+class AIAssumption(StrictModel):
+    id: str = Field(pattern=r"^assumption-\d{2}$")
+    statement: str = Field(min_length=1)
+    requires_validation: bool
+
+
+class ExpectedEvidenceType(StrictModel):
+    evidence_type: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    priority: int = Field(ge=1)
+
+
+class PotentialBias(StrictModel):
+    bias: str = Field(min_length=1)
+    risk: str = Field(min_length=1)
+    mitigation: str = Field(min_length=1)
+
+
+class AIInvestigationPlan(InvestigationPlan):
+    research_objective: AIResearchObjective
+    assumptions: list[AIAssumption] = Field(min_length=1)
+    expected_evidence_types: list[ExpectedEvidenceType] = Field(min_length=1)
+    potential_biases: list[PotentialBias] = Field(min_length=1)
+
+
 class InvestigationResponse(StrictModel):
     status: Literal["investigation_planned"]
-    plan: InvestigationPlan
+    plan: AIInvestigationPlan | InvestigationPlan
