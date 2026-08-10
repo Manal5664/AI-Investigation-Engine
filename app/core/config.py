@@ -104,6 +104,18 @@ class Settings:
         "RAG_CHUNK_OVERLAP",
         200,
     )
+    GRAPH_STORE_PROVIDER: str = os.getenv(
+        "GRAPH_STORE_PROVIDER",
+        "in_memory",
+    )
+    GRAPH_EXTRACTION_PROVIDER: str = os.getenv(
+        "GRAPH_EXTRACTION_PROVIDER",
+        "mock",
+    )
+    GRAPH_EXTRACTION_MODEL: str = os.getenv(
+        "GRAPH_EXTRACTION_MODEL",
+        "mock-graph-extractor",
+    )
 
     def __post_init__(self) -> None:
         if self.RAG_CHUNK_OVERLAP >= self.RAG_CHUNK_SIZE:

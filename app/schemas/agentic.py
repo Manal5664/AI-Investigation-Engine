@@ -118,6 +118,7 @@ class AgenticInvestigationRequest(StrictModel):
     run_critic: bool = True
     max_critic_rounds: int = Field(default=1, ge=1, le=2)
     use_rag: bool = False
+    use_graph_rag: bool = False
 
 
 class AgenticInvestigationResult(StrictModel):

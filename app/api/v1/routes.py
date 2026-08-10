@@ -9,6 +9,8 @@ from app.api.v1.research_routes import router as research_router
 from app.api.v1.rag_routes import router as rag_router
 from app.core.config import settings
 from app.evidence.factory import create_evidence_extractor
+from app.graph.extraction.factory import create_graph_extraction_provider
+from app.graph.factory import get_graph_store
 from app.rag.embeddings.factory import create_embedding_provider
 from app.rag.vectorstore.factory import get_vector_store
 from app.research.search.factory import create_search_provider
@@ -27,6 +29,8 @@ from app.schemas.research import (
     InvestigationResearchResponse,
 )
 from app.services.ai_investigation_service import AIInvestigationService
+from app.services.graph_builder_service import GraphBuilderService
+from app.services.graph_rag_service import GraphRAGService
 from app.services.investigation_service import InvestigationPlanner
 from app.services.investigation_research_service import (
     InvestigationResearchService,
@@ -150,11 +154,12 @@ async def run_agentic_investigation(
     search_provider = create_search_provider("gemini_grounded")
     evidence_extractor = None
     embedding_provider = None
+    graph_extraction_provider = None
     try:
         evidence_extractor = create_evidence_extractor()
         rag_indexing_service = None
         rag_retrieval_service = None
-        if request.use_rag:
+        if request.use_rag or request.use_graph_rag:
             embedding_provider = create_embedding_provider()
             vector_store = get_vector_store()
             rag_indexing_service = RAGIndexingService(
@@ -164,6 +169,19 @@ async def run_agentic_investigation(
             rag_retrieval_service = RAGRetrievalService(
                 embedding_provider,
                 vector_store,
+            )
+        graph_builder_service = None
+        graph_rag_service = None
+        if request.use_graph_rag:
+            graph_extraction_provider = create_graph_extraction_provider()
+            graph_store = get_graph_store()
+            graph_builder_service = GraphBuilderService(
+                graph_store,
+                graph_extraction_provider,
+            )
+            graph_rag_service = GraphRAGService(
+                rag_retrieval_service=rag_retrieval_service,
+                graph_store=graph_store,
             )
         research_agent = ResearchAgent(search_provider)
         evidence_agent = EvidenceAgent(evidence_extractor)
@@ -179,9 +197,13 @@ async def run_agentic_investigation(
             critic_agent=critic_agent,
             rag_indexing_service=rag_indexing_service,
             rag_retrieval_service=rag_retrieval_service,
+            graph_builder_service=graph_builder_service,
+            graph_rag_service=graph_rag_service,
         )
         return await orchestrator.investigate(request)
     finally:
+        if graph_extraction_provider is not None:
+            await graph_extraction_provider.aclose()
         if embedding_provider is not None:
             await embedding_provider.aclose()
         if evidence_extractor is not None:

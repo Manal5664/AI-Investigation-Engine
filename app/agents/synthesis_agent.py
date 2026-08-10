@@ -32,6 +32,7 @@ class SynthesisAgent:
         conflicts: Sequence[EvidenceConflictReport],
         critic_result: CriticResult,
         errors: Sequence[ProviderFailure],
+        graph_context: Sequence[str] | None = None,
     ) -> SynthesisResult:
         del query
         items = list(evidence_items)
@@ -78,6 +79,13 @@ class SynthesisAgent:
             limitations.append(
                 "The bounded critic search found no new opposing evidence; "
                 "that absence is an evidence gap, not confirmation."
+            )
+        if graph_context:
+            limitations.append(
+                "Graph retrieval added structural context about how the "
+                "supplied sources, claims, and evidence relate to each "
+                "other. It summarizes graph relationships only and does not "
+                "change the evidence classifications above."
             )
 
         alternative_explanations = [

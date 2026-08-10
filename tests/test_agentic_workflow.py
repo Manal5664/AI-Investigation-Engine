@@ -14,6 +14,11 @@ from app.agents.orchestrator import InvestigationOrchestrator
 from app.agents.research_agent import ResearchAgent
 from app.evidence.base import EvidenceProviderError
 from app.evidence.mock_extractor import MockEvidenceExtractor
+from app.graph.models import (
+    GraphNode,
+    GraphNodeType,
+    GraphStats,
+)
 from app.main import app
 from app.research.search.base import (
     SearchProvider,
@@ -29,6 +34,13 @@ from app.schemas.agentic import (
     SynthesisConfidence,
 )
 from app.schemas.evidence import EvidenceItem
+from app.schemas.graph import (
+    GraphBuildRequest,
+    GraphBuildResult,
+    GraphRAGContextItem,
+    GraphRAGRequest,
+    GraphRAGResult,
+)
 from app.schemas.investigation import InvestigationRequest
 from app.schemas.research import SearchResult
 from app.schemas.source import Source, SourceType
@@ -146,12 +158,72 @@ class FabricatingExtractor(MockEvidenceExtractor):
         return [items[0].model_copy(update={"provenance": bad_provenance})]
 
 
+class FakeGraphBuilderService:
+    provider_name = "fake-graph-extractor"
+    model_name = "fake-graph-model"
+
+    def __init__(self) -> None:
+        self.build_calls: list[GraphBuildRequest] = []
+
+    async def build(self, request: GraphBuildRequest) -> GraphBuildResult:
+        self.build_calls.append(request)
+        return GraphBuildResult(
+            investigation_id=request.investigation_id,
+            nodes_added=0,
+            edges_added=0,
+            duplicates_skipped=0,
+            claims_built=len(request.sub_questions),
+            sources_built=len(request.sources),
+            evidence_built=len(request.evidence_items),
+            entities_extracted=0,
+            relations_extracted=0,
+            warnings=["fake graph build completed"],
+            stats=GraphStats(
+                store_type="in_memory",
+                node_count=0,
+                edge_count=0,
+                investigation_count=1,
+            ),
+        )
+
+
+class FakeGraphRAGService:
+    def __init__(self) -> None:
+        self.search_calls: list[GraphRAGRequest] = []
+
+    async def search(self, request: GraphRAGRequest) -> GraphRAGResult:
+        self.search_calls.append(request)
+        node = GraphNode(
+            node_id="graph-node-001",
+            node_type=GraphNodeType.CLAIM,
+            label="claim node",
+        )
+        return GraphRAGResult(
+            query=request.query,
+            vector_matches=[],
+            graph_matches=[node],
+            graph_paths=[],
+            merged_context=[
+                GraphRAGContextItem(
+                    kind="claim",
+                    text=request.query,
+                    node_id="graph-node-001",
+                    node_type="claim",
+                    score=1.0,
+                )
+            ],
+            provenance=[],
+        )
+
+
 def _orchestrator(
     search_provider: SearchProvider,
     extractor: MockEvidenceExtractor | None = None,
     *,
     rag_indexing_service: RAGIndexingService | None = None,
     rag_retrieval_service: RAGRetrievalService | None = None,
+    graph_builder_service: FakeGraphBuilderService | None = None,
+    graph_rag_service: FakeGraphRAGService | None = None,
 ) -> InvestigationOrchestrator:
     evidence_extractor = extractor or MockEvidenceExtractor()
     research_agent = ResearchAgent(search_provider)
@@ -167,6 +239,8 @@ def _orchestrator(
         ),
         rag_indexing_service=rag_indexing_service,
         rag_retrieval_service=rag_retrieval_service,
+        graph_builder_service=graph_builder_service,
+        graph_rag_service=graph_rag_service,
     )
 
 
@@ -177,6 +251,7 @@ def _request(
     max_sources_per_question: int = 2,
     max_critic_rounds: int = 1,
     use_rag: bool = False,
+    use_graph_rag: bool = False,
 ) -> AgenticInvestigationRequest:
     return AgenticInvestigationRequest(
         query="Research long-duration storage performance",
@@ -186,6 +261,7 @@ def _request(
         run_critic=run_critic,
         max_critic_rounds=max_critic_rounds,
         use_rag=use_rag,
+        use_graph_rag=use_graph_rag,
     )
 
 
@@ -237,6 +313,62 @@ def test_agentic_use_rag_false_preserves_original_step_flow() -> None:
         "critic_executed",
         "synthesis_produced",
     ]
+
+
+def test_agentic_use_graph_rag_builds_graph_retrieves_context_and_notes_limit() -> None:
+    search = ScriptedSearchProvider([[SUPPORTING, NEUTRAL], [CONTRADICTING]])
+    embedding_provider = MockEmbeddingProvider(dimensions=32)
+    vector_store = InMemoryVectorStore()
+    builder = FakeGraphBuilderService()
+    ragger = FakeGraphRAGService()
+    result = asyncio.run(
+        _orchestrator(
+            search,
+            rag_indexing_service=RAGIndexingService(
+                embedding_provider,
+                vector_store,
+                chunk_size=100,
+                chunk_overlap=10,
+            ),
+            rag_retrieval_service=RAGRetrievalService(
+                embedding_provider,
+                vector_store,
+            ),
+            graph_builder_service=builder,
+            graph_rag_service=ragger,
+        ).investigate(
+            _request(run_critic=True, use_graph_rag=True)
+        )
+    )
+
+    state = result.state
+    assert state.status == "completed"
+    assert len(builder.build_calls) == 1
+    assert len(ragger.search_calls) == 1
+    assert (
+        ragger.search_calls[0].investigation_id
+        == builder.build_calls[0].investigation_id
+    )
+    assert ragger.search_calls[0].query == builder.build_calls[0].sub_questions[0].question
+
+    steps = [step.step_name for step in state.audit_trail]
+    assert "graph_build" in steps
+    assert "graph_rag_sq-01" in steps
+    assert steps.index("graph_build") > steps.index("conflicts_detected")
+    assert steps.index("graph_rag_sq-01") > steps.index("graph_build")
+    assert steps.index("graph_rag_sq-01") < steps.index("critic_executed")
+
+    graph_build = next(
+        step for step in state.audit_trail if step.step_name == "graph_build"
+    )
+    assert graph_build.source_count == 2
+    assert graph_build.evidence_count == 2
+    assert graph_build.warnings == ["fake graph build completed"]
+
+    assert any(
+        "Graph retrieval added structural context" in limitation
+        for limitation in state.synthesis.important_limitations
+    )
 
 
 def test_agentic_use_rag_true_indexes_retrieves_and_preserves_provenance() -> None:

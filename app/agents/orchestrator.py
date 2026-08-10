@@ -1,3 +1,4 @@
+import hashlib
 from collections import Counter
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
@@ -31,10 +32,17 @@ from app.schemas.evidence import (
     EvidenceStanceCounts,
     ProviderFailure,
 )
+from app.schemas.graph import (
+    GraphBuildRequest,
+    GraphRAGRequest,
+    GraphRAGResult,
+)
 from app.schemas.investigation import InvestigationRequest
 from app.schemas.rag import IndexRequest, RetrievalRequest, RetrievalResult
 from app.schemas.source import Source
 from app.services.evidence_conflict_service import EvidenceConflictService
+from app.services.graph_builder_service import GraphBuilderService
+from app.services.graph_rag_service import GraphRAGService
 from app.services.investigation_service import InvestigationPlanner
 from app.services.rag_indexing_service import RAGIndexingService
 from app.services.rag_retrieval_service import RAGRetrievalService
@@ -58,6 +66,8 @@ class InvestigationOrchestrator:
         conflict_service: EvidenceConflictService | None = None,
         rag_indexing_service: RAGIndexingService | None = None,
         rag_retrieval_service: RAGRetrievalService | None = None,
+        graph_builder_service: GraphBuilderService | None = None,
+        graph_rag_service: GraphRAGService | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._research_agent = research_agent
@@ -70,6 +80,8 @@ class InvestigationOrchestrator:
         )
         self._rag_indexing_service = rag_indexing_service
         self._rag_retrieval_service = rag_retrieval_service
+        self._graph_builder_service = graph_builder_service
+        self._graph_rag_service = graph_rag_service
         self._clock = clock or (lambda: datetime.now(UTC))
 
     async def investigate(
@@ -82,12 +94,21 @@ class InvestigationOrchestrator:
                 depth=request.depth,
             )
         self._assert_limits(request)
-        if request.use_rag and (
+        uses_rag = request.use_rag or request.use_graph_rag
+        if uses_rag and (
             self._rag_indexing_service is None
             or self._rag_retrieval_service is None
         ):
             raise ValueError(
-                "RAG services are required when use_rag is true."
+                "RAG services are required when use_rag or use_graph_rag "
+                "is true."
+            )
+        if request.use_graph_rag and (
+            self._graph_builder_service is None
+            or self._graph_rag_service is None
+        ):
+            raise ValueError(
+                "Graph services are required when use_graph_rag is true."
             )
         audit: list[AgentStep] = []
         warnings = [
@@ -200,7 +221,7 @@ class InvestigationOrchestrator:
 
             evidence_sources = research_result.sources
             rag_warnings: list[str] = []
-            if request.use_rag and research_result.sources:
+            if uses_rag and research_result.sources:
                 rag_started = self._now()
                 index_result = await self._rag_indexing_service.index(
                     IndexRequest(
@@ -291,7 +312,7 @@ class InvestigationOrchestrator:
                     warnings=rag_warnings,
                 )
                 warnings.extend(rag_warnings)
-            elif request.use_rag:
+            elif uses_rag:
                 rag_warnings.append(
                     "No usable normalized source content was available for "
                     "RAG indexing or retrieval."
@@ -381,6 +402,74 @@ class InvestigationOrchestrator:
             evidence_count=len(all_evidence),
         )
 
+        graph_context_lines: list[str] = []
+        if request.use_graph_rag:
+            graph_started = self._now()
+            investigation_id = self._investigation_id(plan.query)
+            graph_build_result = await self._graph_builder_service.build(
+                GraphBuildRequest(
+                    investigation_id=investigation_id,
+                    query=plan.query,
+                    depth=plan.depth,
+                    sub_questions=selected_questions,
+                    sources=all_sources,
+                    evidence_items=all_evidence,
+                    conflicts=conflicts,
+                )
+            )
+            self._append_step(
+                audit,
+                step_name="graph_build",
+                status=AgentStepStatus.COMPLETED,
+                started_at=graph_started,
+                provider=self._graph_builder_service.provider_name,
+                model=self._graph_builder_service.model_name,
+                summary=(
+                    "Built and updated the knowledge graph from all "
+                    "normalized sources, evidence items, and conflicts."
+                ),
+                input_references=[
+                    source.source_id for source in all_sources
+                ],
+                source_count=graph_build_result.sources_built,
+                evidence_count=graph_build_result.evidence_built,
+                warnings=graph_build_result.warnings,
+            )
+
+            for sub_question in selected_questions:
+                rag_started = self._now()
+                graph_rag_result = await self._graph_rag_service.search(
+                    GraphRAGRequest(
+                        query=sub_question.question,
+                        investigation_id=investigation_id,
+                    )
+                )
+                graph_context_lines.append(
+                    self._graph_rag_summary(
+                        sub_question.id,
+                        graph_rag_result,
+                    )
+                )
+                self._append_step(
+                    audit,
+                    step_name=f"graph_rag_{sub_question.id}",
+                    status=AgentStepStatus.COMPLETED,
+                    started_at=rag_started,
+                    provider="graph_rag",
+                    model="vector+graph_retriever",
+                    summary=(
+                        "Retrieved and merged vector and graph context for "
+                        "one selected sub-question."
+                    ),
+                    input_references=[sub_question.id],
+                    output_references=[
+                        node.node_id
+                        for node in graph_rag_result.graph_matches
+                    ],
+                    source_count=len(graph_rag_result.vector_matches),
+                    evidence_count=len(graph_rag_result.graph_matches),
+                )
+
         critic_started = self._now()
         pre_critic_evidence_ids = [
             item.evidence_id for item in all_evidence
@@ -421,7 +510,8 @@ class InvestigationOrchestrator:
                 known_sources=all_sources,
                 investigation_context=(
                     f"category={plan.category.value}; "
-                    f"selected_questions={len(selected_questions)}"
+                    f"selected_questions={len(selected_questions)}; "
+                    + " ".join(graph_context_lines)
                 ),
                 max_rounds=request.max_critic_rounds,
                 max_sources_per_query=request.max_sources_per_question,
@@ -463,6 +553,7 @@ class InvestigationOrchestrator:
             conflicts=conflicts,
             critic_result=critic_result,
             errors=errors,
+            graph_context=graph_context_lines,
         )
         self._append_step(
             audit,
@@ -621,6 +712,23 @@ class InvestigationOrchestrator:
         if question_results or critic_result.new_evidence_items:
             return "partial"
         return "failed"
+
+    @staticmethod
+    def _investigation_id(query: str) -> str:
+        digest = hashlib.sha256(query.encode("utf-8")).hexdigest()
+        return f"inv-{digest[:12]}"
+
+    @staticmethod
+    def _graph_rag_summary(
+        sub_question_id: str,
+        result: GraphRAGResult,
+    ) -> str:
+        return (
+            f"{sub_question_id}: {len(result.vector_matches)} vector "
+            f"match(es), {len(result.graph_matches)} graph node(s), "
+            f"{len(result.graph_paths)} path(s), "
+            f"{len(result.merged_context)} merged context item(s)"
+        )
 
     @staticmethod
     def _provider_failure(
