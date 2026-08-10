@@ -58,6 +58,7 @@ class ResearchService:
         evidence_items = await self._evidence_extractor.extract(
             selected_sub_question,
             assessed_sources,
+            investigation_query=plan.query,
         )
         counts = Counter(item.stance for item in evidence_items)
 

@@ -18,20 +18,26 @@ class EvidenceSummaryService:
     }
 
     def summarize(self, research_result: ResearchResult) -> EvidenceSummary:
+        return self.summarize_items(research_result.evidence_items)
+
+    def summarize_items(
+        self,
+        evidence_items: list[EvidenceItem],
+    ) -> EvidenceSummary:
         supporting = self._items_with_stance(
-            research_result,
+            evidence_items,
             EvidenceStance.SUPPORTS,
         )
         contradicting = self._items_with_stance(
-            research_result,
+            evidence_items,
             EvidenceStance.CONTRADICTS,
         )
         neutral = self._items_with_stance(
-            research_result,
+            evidence_items,
             EvidenceStance.NEUTRAL,
         )
         insufficient = self._items_with_stance(
-            research_result,
+            evidence_items,
             EvidenceStance.INSUFFICIENT,
         )
 
@@ -59,12 +65,12 @@ class EvidenceSummaryService:
 
     @staticmethod
     def _items_with_stance(
-        research_result: ResearchResult,
+        evidence_items: list[EvidenceItem],
         stance: EvidenceStance,
     ) -> list[EvidenceItem]:
         return [
             item
-            for item in research_result.evidence_items
+            for item in evidence_items
             if item.stance is stance
         ]
 

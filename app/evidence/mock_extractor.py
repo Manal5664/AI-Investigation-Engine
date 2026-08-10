@@ -34,11 +34,22 @@ class MockEvidenceExtractor(EvidenceExtractor):
         CredibilityLevel.UNKNOWN: EvidenceStrength.UNKNOWN,
     }
 
+    @property
+    def provider_name(self) -> str:
+        return "mock"
+
+    @property
+    def model_name(self) -> str:
+        return "mock-evidence-extractor"
+
     async def extract(
         self,
         sub_question: InvestigationSubQuestion,
         sources: Sequence[Source],
+        *,
+        investigation_query: str | None = None,
     ) -> list[EvidenceItem]:
+        del investigation_query
         await asyncio.sleep(0)
         evidence_items = [
             self._extract_from_source(index, sub_question, source)
@@ -73,6 +84,11 @@ class MockEvidenceExtractor(EvidenceExtractor):
                 f"The supplied passage from '{source.title}' was classified "
                 f"as {stance.value} for the selected sub-question."
             ),
+            rationale=(
+                "This deterministic development classifier uses the supplied "
+                "source type and credibility rating; it is not a real-model "
+                "content judgment."
+            ),
             stance=stance,
             strength=strength,
             provenance=EvidenceProvenance(
@@ -81,6 +97,7 @@ class MockEvidenceExtractor(EvidenceExtractor):
                 relevant_passage=passage,
                 retrieved_at=source.retrieved_at,
                 extraction_method="mock_deterministic_snippet",
+                model_used=self.model_name,
                 content_hash=hashlib.sha256(passage.encode("utf-8")).hexdigest(),
                 location=(
                     "search_result.snippet"

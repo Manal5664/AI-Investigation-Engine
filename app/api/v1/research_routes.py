@@ -1,10 +1,16 @@
 from fastapi import APIRouter
 
+from app.evidence.factory import create_evidence_extractor
 from app.evidence.mock_extractor import MockEvidenceExtractor
 from app.core.config import settings
 from app.research.search.factory import create_search_provider
 from app.schemas.common import ErrorResponse
-from app.schemas.evidence import EvidenceSummary
+from app.schemas.evidence import (
+    EvidenceExtractionRequest,
+    EvidenceExtractionResponse,
+    EvidenceSummary,
+)
+from app.services.evidence_extraction_service import EvidenceExtractionService
 from app.schemas.investigation import InvestigationRequest
 from app.schemas.research import (
     ResearchRequest,
@@ -101,6 +107,34 @@ async def run_web_research(
         return result
     finally:
         await provider.aclose()
+
+
+@router.post(
+    "/evidence/extract",
+    response_model=EvidenceExtractionResponse,
+    responses={
+        422: {
+            "model": ErrorResponse,
+            "description": "The extraction request failed validation.",
+        },
+        500: {
+            "model": ErrorResponse,
+            "description": "Evidence provider configuration is invalid.",
+        },
+        502: {
+            "model": ErrorResponse,
+            "description": "The evidence provider failed.",
+        },
+    },
+)
+async def extract_evidence(
+    request: EvidenceExtractionRequest,
+) -> EvidenceExtractionResponse:
+    extractor = create_evidence_extractor()
+    try:
+        return await EvidenceExtractionService(extractor).extract(request)
+    finally:
+        await extractor.aclose()
 
 
 @router.post(

@@ -10,11 +10,44 @@ from app.schemas.research import (
 
 
 class SearchProviderError(ApplicationError):
-    def __init__(self, message: str) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_type: str = "provider_error",
+        provider: str = "unknown",
+        model: str = "unknown",
+        retryable: bool = False,
+        retry_after_seconds: float | None = None,
+    ) -> None:
         super().__init__(
             message,
             code="search_provider_error",
             status_code=502,
+        )
+        self.error_type = error_type
+        self.provider = provider
+        self.model = model
+        self.retryable = retryable
+        self.retry_after_seconds = retry_after_seconds
+
+
+class SearchProviderRateLimitError(SearchProviderError):
+    def __init__(
+        self,
+        *,
+        provider: str,
+        model: str,
+        retry_after_seconds: float | None = None,
+    ) -> None:
+        super().__init__(
+            "Gemini grounded search is temporarily unavailable because the "
+            "API quota or rate limit was exhausted. Please try again later.",
+            error_type="rate_limit",
+            provider=provider,
+            model=model,
+            retryable=True,
+            retry_after_seconds=retry_after_seconds,
         )
 
 

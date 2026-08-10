@@ -1,4 +1,8 @@
-from app.research.search.base import SearchProvider, SearchProviderError
+from app.research.search.base import (
+    SearchProvider,
+    SearchProviderError,
+    SearchProviderRateLimitError,
+)
 from app.research.search.factory import create_search_provider
 from app.research.search.gemini_grounded_provider import (
     GeminiGroundedSearchProvider,
@@ -10,5 +14,6 @@ __all__ = [
     "MockSearchProvider",
     "SearchProvider",
     "SearchProviderError",
+    "SearchProviderRateLimitError",
     "create_search_provider",
 ]

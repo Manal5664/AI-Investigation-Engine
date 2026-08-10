@@ -1,8 +1,11 @@
 import asyncio
 import json
+import math
+import re
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any, ClassVar
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -10,7 +13,11 @@ from google import genai
 from google.genai import errors
 
 from app.core.exceptions import ApplicationConfigurationError
-from app.research.search.base import SearchProvider, SearchProviderError
+from app.research.search.base import (
+    SearchProvider,
+    SearchProviderError,
+    SearchProviderRateLimitError,
+)
 from app.schemas.research import (
     GroundedSearchResponse,
     GroundingCitation,
@@ -22,6 +29,9 @@ from app.schemas.source import SourceMetadata, SourceType
 
 class GeminiGroundedSearchProvider(SearchProvider):
     """Gemini Google Search adapter that trusts only citation annotations."""
+
+    _MAX_ATTEMPTS: ClassVar[int] = 3
+    _INITIAL_RETRY_DELAY_SECONDS: ClassVar[float] = 1.0
 
     _TRACKING_PARAMETERS: ClassVar[set[str]] = {
         "fbclid",
@@ -82,6 +92,7 @@ class GeminiGroundedSearchProvider(SearchProvider):
         timeout_seconds: int = 60,
         client: Any | None = None,
         clock: Callable[[], datetime] | None = None,
+        sleep: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         normalized_model = model_name.strip()
         if not normalized_model:
@@ -105,6 +116,7 @@ class GeminiGroundedSearchProvider(SearchProvider):
         self._owns_client = client is None
         self._client = client or genai.Client(api_key=normalized_api_key)
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._sleep = sleep or asyncio.sleep
 
     @property
     def provider_name(self) -> str:
@@ -152,40 +164,7 @@ class GeminiGroundedSearchProvider(SearchProvider):
             published_before,
         )
 
-        try:
-            interaction = await asyncio.wait_for(
-                self._client.aio.interactions.create(
-                    model=self._model_name,
-                    input=prompt,
-                    tools=[{"type": "google_search"}],
-                ),
-                timeout=self._timeout_seconds,
-            )
-        except asyncio.CancelledError:
-            raise
-        except TimeoutError as exc:
-            raise SearchProviderError(
-                "Gemini grounded search request timed out."
-            ) from exc
-        except errors.ClientError as exc:
-            raise SearchProviderError(
-                self._describe_api_error(
-                    exc,
-                    prefix="Gemini grounded search rejected the request",
-                )
-            ) from exc
-        except errors.ServerError as exc:
-            raise SearchProviderError(
-                self._describe_api_error(
-                    exc,
-                    prefix="Gemini grounded search service error",
-                )
-            ) from exc
-        except Exception as exc:
-            raise SearchProviderError(
-                "Gemini grounded search request failed "
-                f"({type(exc).__name__})."
-            ) from exc
+        interaction = await self._create_interaction_with_retries(prompt)
 
         return self._parse_interaction(
             interaction,
@@ -195,6 +174,244 @@ class GeminiGroundedSearchProvider(SearchProvider):
                 published_after is not None or published_before is not None
             ),
         )
+
+    async def _create_interaction_with_retries(self, prompt: str) -> Any:
+        for attempt in range(1, self._MAX_ATTEMPTS + 1):
+            try:
+                return await asyncio.wait_for(
+                    self._client.aio.interactions.create(
+                        model=self._model_name,
+                        input=prompt,
+                        tools=[{"type": "google_search"}],
+                    ),
+                    timeout=self._timeout_seconds,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if not self._is_rate_limit_error(exc):
+                    raise self._to_provider_error(exc) from exc
+
+                retry_after_seconds = self._retry_after_seconds(exc)
+                if attempt >= self._MAX_ATTEMPTS:
+                    raise SearchProviderRateLimitError(
+                        provider=self.provider_name,
+                        model=self.model_name,
+                        retry_after_seconds=retry_after_seconds,
+                    ) from exc
+
+                exponential_delay = (
+                    self._INITIAL_RETRY_DELAY_SECONDS
+                    * (2 ** (attempt - 1))
+                )
+                delay = max(
+                    exponential_delay,
+                    retry_after_seconds or 0.0,
+                )
+                await self._sleep(delay)
+
+        raise AssertionError("Gemini retry loop exited unexpectedly.")
+
+    def _to_provider_error(self, exc: Exception) -> SearchProviderError:
+        common_fields = {
+            "provider": self.provider_name,
+            "model": self.model_name,
+        }
+        if isinstance(exc, TimeoutError):
+            return SearchProviderError(
+                "Gemini grounded search request timed out.",
+                error_type="timeout",
+                retryable=True,
+                **common_fields,
+            )
+        if isinstance(exc, errors.ClientError):
+            return SearchProviderError(
+                self._describe_api_error(
+                    exc,
+                    prefix="Gemini grounded search rejected the request",
+                ),
+                **common_fields,
+            )
+        if isinstance(exc, errors.ServerError):
+            return SearchProviderError(
+                self._describe_api_error(
+                    exc,
+                    prefix="Gemini grounded search service error",
+                ),
+                error_type="provider_unavailable",
+                retryable=True,
+                **common_fields,
+            )
+        return SearchProviderError(
+            "Gemini grounded search request failed "
+            f"({type(exc).__name__}).",
+            **common_fields,
+        )
+
+    @staticmethod
+    def _is_rate_limit_error(exc: Exception) -> bool:
+        status_values = (
+            getattr(exc, "status_code", None),
+            getattr(exc, "code", None),
+            getattr(exc, "status", None),
+        )
+        if any(
+            str(value).strip().casefold()
+            in {"429", "resource_exhausted"}
+            for value in status_values
+            if value is not None
+        ):
+            return True
+
+        error_name = re.sub(
+            r"[^a-z]",
+            "",
+            type(exc).__name__.casefold(),
+        )
+        if error_name in {"ratelimiterror", "resourceexhausted"}:
+            return True
+
+        diagnostic_text = " ".join(
+            str(value)
+            for value in (
+                getattr(exc, "body", None),
+                getattr(exc, "details", None),
+                getattr(exc, "message", None),
+                exc,
+            )
+            if value is not None
+        ).casefold()
+        return (
+            "resource_exhausted" in diagnostic_text
+            or "resource exhausted" in diagnostic_text
+            or "rate limit" in diagnostic_text
+            or "quota exceeded" in diagnostic_text
+        )
+
+    def _retry_after_seconds(self, exc: Exception) -> float | None:
+        response = getattr(exc, "response", None)
+        headers = getattr(response, "headers", None)
+        if headers is not None:
+            retry_after_ms = self._parse_duration(
+                headers.get("retry-after-ms"),
+                default_unit="milliseconds",
+            )
+            if retry_after_ms is not None:
+                return retry_after_ms
+
+            raw_retry_after = headers.get("retry-after")
+            retry_after = self._parse_duration(
+                raw_retry_after,
+                default_unit="seconds",
+            )
+            if retry_after is not None:
+                return retry_after
+            retry_date = self._parse_retry_date(raw_retry_after)
+            if retry_date is not None:
+                return retry_date
+
+        retry_after = self._parse_duration(
+            getattr(exc, "retry_after_seconds", None),
+            default_unit="seconds",
+        )
+        if retry_after is not None:
+            return retry_after
+        retry_after = self._parse_duration(
+            getattr(exc, "retry_after", None),
+            default_unit="seconds",
+        )
+        if retry_after is not None:
+            return retry_after
+
+        for payload in (
+            getattr(exc, "body", None),
+            getattr(exc, "details", None),
+        ):
+            retry_after = self._find_retry_delay(payload)
+            if retry_after is not None:
+                return retry_after
+        return None
+
+    def _parse_retry_date(self, value: Any) -> float | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        try:
+            retry_date = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return None
+        if retry_date.tzinfo is None:
+            retry_date = retry_date.replace(tzinfo=UTC)
+        now = self._clock()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=UTC)
+        return max(0.0, (retry_date - now).total_seconds())
+
+    @classmethod
+    def _find_retry_delay(cls, value: Any) -> float | None:
+        if isinstance(value, Mapping):
+            for key, nested_value in value.items():
+                normalized_key = re.sub(
+                    r"[^a-z]",
+                    "",
+                    str(key).casefold(),
+                )
+                if normalized_key in {
+                    "retrydelay",
+                    "retryafter",
+                    "retryafterseconds",
+                }:
+                    delay = cls._parse_duration(
+                        nested_value,
+                        default_unit="seconds",
+                    )
+                    if delay is not None:
+                        return delay
+                if normalized_key == "retryafterms":
+                    delay = cls._parse_duration(
+                        nested_value,
+                        default_unit="milliseconds",
+                    )
+                    if delay is not None:
+                        return delay
+            for nested_value in value.values():
+                delay = cls._find_retry_delay(nested_value)
+                if delay is not None:
+                    return delay
+        elif isinstance(value, (list, tuple)):
+            for nested_value in value:
+                delay = cls._find_retry_delay(nested_value)
+                if delay is not None:
+                    return delay
+        return None
+
+    @staticmethod
+    def _parse_duration(
+        value: Any,
+        *,
+        default_unit: str,
+    ) -> float | None:
+        if isinstance(value, bool) or value is None:
+            return None
+        if isinstance(value, (int, float)):
+            numeric_value = float(value)
+            if not math.isfinite(numeric_value) or numeric_value < 0:
+                return None
+            if default_unit == "milliseconds":
+                return numeric_value / 1000
+            return numeric_value
+        if not isinstance(value, str):
+            return None
+
+        match = re.fullmatch(
+            r"\s*(\d+(?:\.\d+)?)\s*(ms|s|sec|secs|second|seconds)?\s*",
+            value,
+            flags=re.IGNORECASE,
+        )
+        if match is None:
+            return None
+        numeric_value = float(match.group(1))
+        unit = (match.group(2) or default_unit).casefold()
+        return numeric_value / 1000 if unit == "ms" or unit == "milliseconds" else numeric_value
 
     async def aclose(self) -> None:
         if self._owns_client:

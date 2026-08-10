@@ -3,7 +3,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, call, patch
 
 import httpx
 import pytest
@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.core.exceptions import ApplicationConfigurationError
 from app.main import app
 from app.research.search.factory import create_search_provider
+from app.research.search.base import SearchProviderRateLimitError
 from app.research.search.gemini_grounded_provider import (
     GeminiGroundedSearchProvider,
 )
@@ -110,8 +111,15 @@ def _default_annotations() -> list[SimpleNamespace]:
 
 def _provider(
     interaction: SimpleNamespace,
+    *,
+    side_effect: list[Any] | None = None,
+    sleep: AsyncMock | None = None,
 ) -> tuple[GeminiGroundedSearchProvider, AsyncMock]:
-    create_interaction = AsyncMock(return_value=interaction)
+    create_interaction = (
+        AsyncMock(side_effect=side_effect)
+        if side_effect is not None
+        else AsyncMock(return_value=interaction)
+    )
     client = SimpleNamespace(
         aio=SimpleNamespace(
             interactions=SimpleNamespace(create=create_interaction)
@@ -122,8 +130,29 @@ def _provider(
         api_key="test-api-key",
         client=client,
         clock=lambda: RETRIEVED_AT,
+        sleep=sleep,
     )
     return provider, create_interaction
+
+
+class RateLimitError(Exception):
+    def __init__(
+        self,
+        *,
+        headers: dict[str, str] | None = None,
+        body: Any = None,
+    ) -> None:
+        super().__init__("Gemini quota exhausted")
+        self.status_code = 429
+        self.body = body
+        self.response = SimpleNamespace(headers=headers or {})
+
+
+class ResourceExhaustedError(Exception):
+    def __init__(self, details: Any) -> None:
+        super().__init__("Gemini request unavailable")
+        self.status = "RESOURCE_EXHAUSTED"
+        self.details = details
 
 
 def test_grounded_sources_are_parsed_and_normalized() -> None:
@@ -164,6 +193,134 @@ def test_grounded_sources_are_parsed_and_normalized() -> None:
     assert call.kwargs["model"] == "gemini-3.6-flash"
     assert call.kwargs["tools"] == [{"type": "google_search"}]
     assert "Do not provide a final truth verdict" in call.kwargs["input"]
+
+
+def test_grounded_search_immediate_success_does_not_sleep() -> None:
+    sleep = AsyncMock()
+    provider, create_interaction = _provider(
+        _interaction(_default_annotations()),
+        sleep=sleep,
+    )
+
+    response = asyncio.run(
+        provider.search_with_context(
+            "Research immediate grounded search success",
+            5,
+        )
+    )
+
+    assert response.results
+    assert create_interaction.await_count == 1
+    sleep.assert_not_awaited()
+
+
+def test_grounded_search_retries_rate_limit_then_succeeds() -> None:
+    sleep = AsyncMock()
+    interaction = _interaction(_default_annotations())
+    provider, create_interaction = _provider(
+        interaction,
+        side_effect=[
+            RateLimitError(headers={"retry-after": "1.5"}),
+            interaction,
+        ],
+        sleep=sleep,
+    )
+
+    response = asyncio.run(
+        provider.search_with_context(
+            "Research rate-limited grounded search recovery",
+            5,
+        )
+    )
+
+    assert response.results
+    assert create_interaction.await_count == 2
+    sleep.assert_awaited_once_with(1.5)
+
+
+def test_grounded_search_repeated_rate_limits_exhaust_attempts() -> None:
+    sleep = AsyncMock()
+    rate_limits = [RateLimitError() for _ in range(3)]
+    provider, create_interaction = _provider(
+        _interaction(),
+        side_effect=rate_limits,
+        sleep=sleep,
+    )
+
+    with pytest.raises(SearchProviderRateLimitError) as captured:
+        asyncio.run(
+            provider.search_with_context(
+                "Research repeated grounded search rate limits",
+                5,
+            )
+        )
+
+    error = captured.value
+    assert error.error_type == "rate_limit"
+    assert error.provider == "gemini_grounded"
+    assert error.model == "gemini-3.6-flash"
+    assert error.retryable is True
+    assert error.retry_after_seconds is None
+    assert "API quota or rate limit was exhausted" in error.message
+    assert create_interaction.await_count == 3
+    assert sleep.await_args_list == [call(1.0), call(2.0)]
+
+
+def test_resource_exhausted_error_preserves_retry_metadata() -> None:
+    sleep = AsyncMock()
+    details = {
+        "error": {
+            "status": "RESOURCE_EXHAUSTED",
+            "details": [
+                {
+                    "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                    "retryDelay": "4.5s",
+                }
+            ],
+        }
+    }
+    provider, _ = _provider(
+        _interaction(),
+        side_effect=[ResourceExhaustedError(details) for _ in range(3)],
+        sleep=sleep,
+    )
+
+    with pytest.raises(SearchProviderRateLimitError) as captured:
+        asyncio.run(
+            provider.search_with_context(
+                "Research RESOURCE_EXHAUSTED retry metadata",
+                5,
+            )
+        )
+
+    assert captured.value.retry_after_seconds == 4.5
+    assert captured.value.retryable is True
+    assert sleep.await_args_list == [call(4.5), call(4.5)]
+
+
+def test_rate_limit_failure_does_not_fabricate_sources() -> None:
+    sleep = AsyncMock()
+    provider, create_interaction = _provider(
+        _interaction(),
+        side_effect=[RateLimitError() for _ in range(3)],
+        sleep=sleep,
+    )
+
+    with patch(
+        "app.research.search.mock_provider."
+        "MockSearchProvider.search_with_context",
+        new_callable=AsyncMock,
+    ) as mock_search:
+        with pytest.raises(SearchProviderRateLimitError):
+            asyncio.run(
+                WebResearchService(provider).research(
+                    "Research grounded failure without fake sources",
+                    max_results=5,
+                )
+            )
+
+    assert create_interaction.await_count == 3
+    mock_search.assert_not_awaited()
 
 
 def test_grounded_provider_requires_api_key() -> None:

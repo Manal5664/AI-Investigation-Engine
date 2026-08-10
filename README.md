@@ -6,6 +6,8 @@ and a provider-independent AI planning flow. The offline `mock` provider remains
 the default; an opt-in Google Gemini adapter can make real model calls when
 explicitly configured with an API key and model name. A separate opt-in Gemini
 Google Search grounding path returns normalized, citation-backed web sources.
+An independently configured Gemini evidence adapter can classify only the
+source material supplied to it and preserve validated provenance.
 
 ## Current features
 
@@ -30,12 +32,21 @@ Google Search grounding path returns normalized, citation-backed web sources.
 - Grounded source provenance and source-quality heuristic assessment.
 - Explainable source-quality scoring with explicit caveats.
 - Provenance-preserving evidence extraction and stance classification.
+- Strict Gemini evidence extraction with structured JSON and source allowlists.
+- Conflict detection for opposing source claims without a truth verdict.
+- Bounded end-to-end investigation research with explicit partial failures.
+- Bounded agentic orchestration with research, evidence, critic, conflict, and
+  synthesis agents plus a public replay log.
+- Provider-neutral asynchronous embeddings, deterministic chunking, semantic
+  retrieval, and duplicate-safe in-memory vector indexing.
+- Optional RAG grounding in the agentic workflow through `use_rag`.
 - Structured evidence summaries without final truth verdicts.
 - Pytest and HTTP-level ASGI endpoint tests.
 
-Gemini planning and Gemini Google Search grounding are the only optional
-external integrations. No third-party search SDK, autonomous crawler, retrieval
-system, database, agent, or persistence layer is connected.
+Gemini planning, Gemini Google Search grounding, Gemini evidence extraction,
+and Gemini embeddings are the optional external integrations. No third-party
+search SDK, autonomous crawler, external vector database, authentication layer,
+or persistence service is connected.
 
 ## Architecture
 
@@ -46,6 +57,8 @@ flowchart LR
     Routes -->|/plan| Deterministic[InvestigationPlanner]
     Routes -->|/ai-plan| AIService[AIInvestigationService]
     Routes -->|/research/web| WebService[WebResearchService]
+    Routes -->|/evidence/extract| EvidenceService[EvidenceExtractionService]
+    Routes -->|/investigations/research| Pipeline[Bounded Research Pipeline]
 
     AIService --> Factory[LLM provider factory]
     Factory --> Mock[MockLLMProvider]
@@ -66,7 +79,52 @@ flowchart LR
     Grounded --> GoogleSearch[Gemini Google Search tool]
     GoogleSearch --> Citations[URL citation annotations]
     Citations --> Sources[Normalized, credibility-scored Sources]
+    Sources --> EvidenceService
+    EvidenceService --> EvidenceFactory[Evidence provider factory]
+    EvidenceFactory --> GeminiEvidence[GeminiEvidenceExtractor]
+    EvidenceFactory --> MockEvidence[MockEvidenceExtractor]
+    Pipeline --> WebService
+    Pipeline --> EvidenceService
+    Pipeline --> Conflicts[EvidenceConflictService]
 ```
+
+### RAG and semantic retrieval
+
+```text
+Sources
+  ↓
+Chunker
+  ↓
+Embedding Provider
+  ↓
+Vector Store
+  ↓
+Semantic Retriever
+  ↓
+Evidence / Agentic Investigation
+```
+
+An embedding is a numeric representation of text. Similar meanings tend to
+produce vectors with higher cosine similarity, allowing a query to retrieve
+relevant passages even when it does not repeat the source's exact wording.
+Chunking keeps the retrieved context bounded, and RAG passes only the highest
+ranking validated passages forward instead of every collected source passage.
+This reduces irrelevant context; it does not prove that a retrieved passage is
+correct.
+
+`EmbeddingProvider` isolates model-specific embedding calls. The deterministic
+`MockEmbeddingProvider` is the offline default, while
+`GeminiEmbeddingProvider` uses the existing `google-genai` SDK,
+`GEMINI_API_KEY`, and the configured `EMBEDDING_MODEL`. Model names are never
+selected inside the Gemini adapter. `VectorStore` similarly isolates storage;
+Phase 7 intentionally implements only `InMemoryVectorStore`.
+
+Every chunk carries its original source ID and URL, title, optional
+section/location, character offsets, deterministic chunk ID, and SHA-256
+content hash. Retrieval returns those same values. Before retrieved text reaches
+the existing evidence agent, the orchestrator verifies the source ID/URL pair,
+title, content hash, and verbatim membership in the normalized source content.
+It never invents or repairs source provenance.
 
 ### Deterministic and AI-provider flows
 
@@ -134,13 +192,47 @@ flowchart TD
     ResearchResult --> Summary
 ```
 
+### Bounded agentic workflow
+
+```mermaid
+flowchart TD
+    User[User Query] --> Orchestrator[Investigation Orchestrator]
+    Orchestrator --> Planner[Planner]
+    Orchestrator --> ResearchAgent[Research Agent]
+    Orchestrator --> EvidenceAgent[Evidence Agent]
+    Orchestrator --> ConflictDetector[Conflict Detector]
+    Orchestrator --> Critic[Devil's Advocate Agent]
+    Orchestrator --> Synthesis[Synthesis Agent]
+    Synthesis --> Result[Evidence-grounded result + replay log]
+```
+
+The agents are application-level services, not autonomous processes. A request
+can execute at most two primary sub-questions, three sources per question, two
+critic rounds, and three sources per critic query. There is no recursion,
+self-scheduling, or open-ended tool loop.
+
+The critic deliberately looks for strong evidence against the current leading
+interpretation. It records assumptions that may be wrong, deduplicates known
+source URLs, and treats a search that finds no opposing evidence as a gap rather
+than confirmation or contradiction. The synthesis reports confidence in the
+completeness and consistency of the evidence picture, never the probability
+that a claim is true.
+
+Every orchestrator action appends a typed replay step with timestamps,
+provider/model metadata, concise action summaries, counts, warnings/errors, and
+source/evidence references. The replay log contains no hidden chain-of-thought
+or private model reasoning. Provider failures produce partial output whenever
+validated sources or evidence remain, and mock sources are never substituted
+after a real research failure.
+
 ### Provenance
 
 Every evidence item retains the supplied source ID and URL, the exact relevant
-passage, retrieval timestamp, extraction method, optional location, and a
-SHA-256 content hash. The extractor validates every evidence source ID/URL pair
-against the supplied normalized source list. It cannot silently create or cite
-a source outside that list.
+passage, retrieval timestamp, extraction method, model identifier, rationale,
+optional location, and a SHA-256 content hash. The Gemini extractor validates
+every evidence source ID/URL pair and requires the passage to be a verbatim
+substring of supplied source material. Unknown, changed, duplicated, or omitted
+sources fail the extraction; they are never silently dropped or fabricated.
 
 ### Source-quality scoring is not truth
 
@@ -159,9 +251,11 @@ model prose are ignored. Valid URLs are normalized, stripped of common tracking
 parameters and fragments, deduplicated, capped by `max_results`, and converted
 to typed `Source` records.
 
-The web path stops after source normalization and credibility assessment. It
-does not run the mock evidence extractor or make a truth determination. A future
-real evidence extractor must preserve the same source-bound provenance contract.
+The standalone web path stops after source normalization and credibility
+assessment. It does not run an evidence extractor or make a truth determination.
+The end-to-end investigation path passes those normalized sources to the
+configured evidence extractor and never substitutes mock search sources after a
+real search failure.
 
 ## Project structure
 
@@ -231,8 +325,14 @@ AI-Investigation-Engine/
 
 Gemini-specific additions include `app/ai/gemini_provider.py`,
 `app/research/search/gemini_grounded_provider.py`,
-`app/services/web_research_service.py`, and the guarded scripts under
-`scripts/`.
+`app/evidence/gemini_extractor.py`, `app/evidence/factory.py`,
+`app/services/evidence_conflict_service.py`,
+`app/services/investigation_research_service.py`, and the guarded scripts under
+`scripts/`. The bounded Phase 6 workflow lives in `app/agents/`, with its public
+state and replay schemas in `app/schemas/agentic.py`.
+Phase 7 retrieval code lives in `app/rag/`, with typed public schemas in
+`app/schemas/rag.py`, HTTP routes in `app/api/v1/rag_routes.py`, and indexing
+and retrieval application services under `app/services/`.
 
 ## Run locally
 
@@ -260,9 +360,16 @@ The application reads these optional environment variables:
 | `LLM_MODEL` | `mock-investigator` |
 | `LLM_TIMEOUT_SECONDS` | `60` |
 | `GEMINI_API_KEY` | unset |
+| `EVIDENCE_PROVIDER` | `mock` |
+| `EVIDENCE_MODEL` | `gemini-3.6-flash` |
 | `SEARCH_PROVIDER` | `mock` |
 | `SEARCH_MODEL` | `gemini-3.6-flash` |
 | `SEARCH_MAX_RESULTS` | `5` |
+| `EMBEDDING_PROVIDER` | `mock` |
+| `EMBEDDING_MODEL` | `mock-embedding-v1` |
+| `VECTOR_STORE_PROVIDER` | `in_memory` |
+| `RAG_CHUNK_SIZE` | `1000` |
+| `RAG_CHUNK_OVERLAP` | `200` |
 
 The application loads a project-root `.env` file when present. Explicit process
 environment variables take precedence. Set `APP_ENV_FILE` to another path to
@@ -294,6 +401,35 @@ Run one real grounded web-research request:
 python -m scripts.test_web_research
 ```
 
+Run one deliberately small real end-to-end investigation (one quick
+sub-question and at most two sources):
+
+```powershell
+$env:EVIDENCE_PROVIDER="gemini"
+$env:EVIDENCE_MODEL="gemini-3.6-flash"
+python -m scripts.test_real_investigation
+```
+
+Run one small real agentic investigation with one primary question, two sources,
+and one critic round:
+
+```powershell
+python -m scripts.test_agentic_investigation
+```
+
+Run the optional real Gemini embedding smoke test with one configured model and
+two tiny strings:
+
+```powershell
+$env:EMBEDDING_PROVIDER="gemini"
+$env:EMBEDDING_MODEL="<supported-embedding-model>"
+python -m scripts.test_gemini_embeddings
+```
+
+All real scripts require `GEMINI_API_KEY`. They never print the key. Model and
+grounded-search usage may consume quota or incur charges, so these scripts are
+opt-in and are never run by the automated test suite.
+
 ## API endpoints
 
 | Method | Path | Purpose |
@@ -302,9 +438,15 @@ python -m scripts.test_web_research
 | `GET` | `/health` | Health and environment status |
 | `POST` | `/api/v1/investigations/plan` | Generate a deterministic investigation plan |
 | `POST` | `/api/v1/investigations/ai-plan` | Generate a provider-backed AI-style plan |
+| `POST` | `/api/v1/investigations/research` | Run bounded grounded research, evidence extraction, conflict detection, and summary |
+| `POST` | `/api/v1/investigations/agentic` | Run the bounded research/evidence/critic/synthesis workflow with replay metadata |
 | `POST` | `/api/v1/research/mock` | Run the offline mock research/evidence pipeline |
 | `POST` | `/api/v1/research/web` | Run real Gemini Google Search grounding and normalize cited sources |
+| `POST` | `/api/v1/evidence/extract` | Extract strictly source-grounded evidence with the configured evidence provider |
 | `POST` | `/api/v1/evidence/summary` | Summarize evidence counts and unresolved conflicts |
+| `POST` | `/api/v1/rag/index` | Chunk, embed, and index normalized source content |
+| `POST` | `/api/v1/rag/search` | Retrieve the highest-cosine matching source chunks |
+| `GET` | `/api/v1/rag/stats` | Inspect non-secret in-memory vector-store statistics |
 
 ### Planning request
 
@@ -476,6 +618,106 @@ The response is a typed `ResearchResult` containing:
 - Counts for `supports`, `contradicts`, `neutral`, and `insufficient`.
 - Warnings about low-quality sources and heuristic limitations.
 
+### Evidence extraction request
+
+```json
+{
+  "query": "Long-duration storage improved discharge duration",
+  "sub_question": "Does the supplied source support the duration claim?",
+  "sources": [
+    {
+      "source_id": "source-001",
+      "title": "Official storage trial report",
+      "url": "https://agency.example/storage/report",
+      "domain": "agency.example",
+      "retrieved_at": "2026-08-11T12:00:00Z",
+      "source_type": "government",
+      "snippet": "The trial reported a twelve-hour discharge duration.",
+      "metadata": {},
+      "credibility": null,
+      "author": null,
+      "publisher": null,
+      "published_at": null
+    }
+  ]
+}
+```
+
+Send this body to `POST /api/v1/evidence/extract`. `EVIDENCE_PROVIDER=mock`
+selects the labeled deterministic development extractor;
+`EVIDENCE_PROVIDER=gemini` selects `GeminiEvidenceExtractor` and additionally
+requires `EVIDENCE_MODEL` and `GEMINI_API_KEY`. Gemini receives only the supplied
+title/snippet material. Its structured response must preserve every source ID
+and URL and copy each passage verbatim. Any unknown source or fabricated passage
+causes a typed provider error instead of a partial evidence list.
+
+The response contains `provider_used`, `model_used`, typed `evidence_items`,
+`stance_counts`, and warnings. Stances are `supports`, `contradicts`, `neutral`,
+or `insufficient`; strengths are `strong`, `moderate`, `weak`, or `unknown`.
+Missing evidence is classified as `insufficient`, never as contradiction.
+
+### End-to-end investigation research request
+
+```json
+{
+  "query": "Research long-duration energy storage performance",
+  "depth": "quick",
+  "max_sub_questions": 1,
+  "max_sources_per_question": 2
+}
+```
+
+Send this body to `POST /api/v1/investigations/research`. The service creates a
+deterministic plan, selects the highest-priority questions, performs real Gemini
+grounded search, normalizes and scores returned sources, invokes the configured
+evidence extractor, detects opposing source claims, and produces an evidence
+summary without a truth verdict.
+
+Cost controls are enforced by request validation: `max_sub_questions` defaults
+to 2 and cannot exceed 2; `max_sources_per_question` defaults to 3 and cannot
+exceed 3. Grounded-search retry behavior is separately bounded to three attempts.
+If web research is rate-limited, the response status is `partial` when earlier
+questions completed or `failed` when none completed, with typed retry metadata.
+No mock sources are substituted.
+
+### Agentic investigation request
+
+```json
+{
+  "query": "Research long-duration energy storage performance",
+  "depth": "quick",
+  "max_sub_questions": 1,
+  "max_sources_per_question": 2,
+  "run_critic": true,
+  "max_critic_rounds": 1,
+  "use_rag": false
+}
+```
+
+Send this body to `POST /api/v1/investigations/agentic`. The orchestrator runs a
+finite planner -> research -> evidence -> conflict -> critic -> synthesis
+sequence. Primary research is limited to 2 sub-questions and 3 sources per
+question. The critic defaults to one research round, has a hard maximum of 2,
+and can request at most 3 sources per round. It challenges the current leading
+interpretation; a failed search or lack of opposing evidence is recorded as an
+evidence gap rather than a contradiction.
+
+`use_rag` defaults to `false`, preserving the Phase 6 execution path. When it
+is `true`, each primary question's usable normalized source content is chunked
+and indexed, the sub-question retrieves its most relevant chunks, and only
+chunks that pass provenance validation are supplied to evidence extraction. The
+replay log adds explicit RAG indexing and retrieval steps.
+
+The response contains the complete typed state plus an ordered `audit_trail`.
+Each audit step exposes status, timestamps, provider/model metadata, concise
+action summaries, evidence references, counts, warnings, and typed errors. It
+does not expose private model reasoning. Successful work is retained when a
+later question, source extraction, critic search, or provider call fails, so the
+result can be `partial` without fabricated replacement sources. Synthesis
+confidence describes the completeness and consistency of the evidence picture;
+it is not a probability that the investigated claim is true, and no binary
+truth verdict is returned.
+
 ### Evidence summary request
 
 Send a complete `ResearchResult` to `POST /api/v1/evidence/summary`. The response
@@ -519,27 +761,37 @@ python -m compileall app
 
 ## Current limitations
 
-- Gemini planning and grounded web research are opt-in and may incur usage
-  charges or quota consumption.
+- Gemini planning, grounded web research, and evidence extraction are opt-in
+  and may incur usage charges or quota consumption.
 - The deterministic mock remains the default for offline development and tests.
 - The mock endpoint still uses deterministic records on reserved domains.
 - The web endpoint depends on Gemini returning usable citation annotations.
 - Grounding metadata generally does not provide author or publication-date
   metadata, which lowers heuristic source-quality scores.
-- Evidence extraction uses supplied mock snippets, not fetched page content.
+- Evidence extraction can use only supplied source titles/snippets; it does not
+  fetch full page content. A classification is limited by that supplied text.
 - Category detection uses local pattern matching rather than a trained model.
-- Prompt templates are sent externally only when `LLM_PROVIDER=gemini`.
-- No autonomous crawling, page-content fetching, RAG, embeddings, or vector
-  database.
-- No persistence, authentication, background jobs, or audit history.
-- No live external evidence collection, truth verification, or report synthesis.
+- Planning prompts are sent externally only when `LLM_PROVIDER=gemini`;
+  evidence prompts are sent externally only when `EVIDENCE_PROVIDER=gemini`.
+- RAG can index only the normalized content supplied to it. The current research
+  providers usually supply titles/snippets rather than complete documents.
+- `InMemoryVectorStore` is process-local, is cleared on restart, is not shared
+  across workers, and is unsuitable as durable production storage. A future
+  phase can add a persistent vector database behind the existing interface.
+- No Pinecone, Chroma, Qdrant, FAISS, Neo4j, or GraphRAG integration is included.
+- No autonomous crawling or page-content fetching.
+- No persistence, authentication, or background jobs. The replay log is returned
+  with the response but is not stored by the service.
+- Synthesis is bounded and evidence-grounded; it does not perform autonomous
+  truth verification or return an absolute truth verdict.
 
 ## Planned roadmap
 
 1. Expand offline evaluation fixtures for planner and evidence quality.
 2. Add evaluation and observability for opt-in LLM adapters.
 3. Add grounded-search evaluation fixtures and provider observability.
-4. Add a structured real-model extractor behind `EvidenceExtractor`.
-5. Add resilient provider telemetry without logging sensitive content.
+4. Add resilient provider telemetry without logging sensitive content.
+5. Add full-page content acquisition with explicit policy controls.
 6. Add persistence and asynchronous investigation jobs.
 7. Add citation validation and evidence-grounded report synthesis.
+8. Add an optional persistent vector-store adapter and reindexing lifecycle.

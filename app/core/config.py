@@ -48,6 +48,16 @@ def _read_positive_int(name: str, default: int) -> int:
     return value
 
 
+def _read_non_negative_int(name: str, default: int) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    value = int(raw_value)
+    if value < 0:
+        raise ValueError(f"{name} must not be negative")
+    return value
+
+
 def _read_optional_secret(name: str) -> str | None:
     raw_value = os.getenv(name)
     if raw_value is None:
@@ -72,9 +82,34 @@ class Settings:
         default_factory=lambda: _read_optional_secret("GEMINI_API_KEY"),
         repr=False,
     )
+    EVIDENCE_PROVIDER: str = os.getenv("EVIDENCE_PROVIDER", "mock")
+    EVIDENCE_MODEL: str = os.getenv(
+        "EVIDENCE_MODEL",
+        "gemini-3.6-flash",
+    )
     SEARCH_PROVIDER: str = os.getenv("SEARCH_PROVIDER", "mock")
     SEARCH_MODEL: str = os.getenv("SEARCH_MODEL", "gemini-3.6-flash")
     SEARCH_MAX_RESULTS: int = _read_positive_int("SEARCH_MAX_RESULTS", 5)
+    EMBEDDING_PROVIDER: str = os.getenv("EMBEDDING_PROVIDER", "mock")
+    EMBEDDING_MODEL: str = os.getenv(
+        "EMBEDDING_MODEL",
+        "mock-embedding-v1",
+    )
+    VECTOR_STORE_PROVIDER: str = os.getenv(
+        "VECTOR_STORE_PROVIDER",
+        "in_memory",
+    )
+    RAG_CHUNK_SIZE: int = _read_positive_int("RAG_CHUNK_SIZE", 1000)
+    RAG_CHUNK_OVERLAP: int = _read_non_negative_int(
+        "RAG_CHUNK_OVERLAP",
+        200,
+    )
+
+    def __post_init__(self) -> None:
+        if self.RAG_CHUNK_OVERLAP >= self.RAG_CHUNK_SIZE:
+            raise ValueError(
+                "RAG_CHUNK_OVERLAP must be smaller than RAG_CHUNK_SIZE"
+            )
 
 
 settings = Settings()

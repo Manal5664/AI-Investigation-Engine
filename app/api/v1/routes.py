@@ -1,16 +1,38 @@
 from fastapi import APIRouter
 
+from app.agents.critic_agent import CriticAgent
+from app.agents.evidence_agent import EvidenceAgent
+from app.agents.orchestrator import InvestigationOrchestrator
+from app.agents.research_agent import ResearchAgent
 from app.ai.factory import create_llm_provider
 from app.api.v1.research_routes import router as research_router
+from app.api.v1.rag_routes import router as rag_router
 from app.core.config import settings
+from app.evidence.factory import create_evidence_extractor
+from app.rag.embeddings.factory import create_embedding_provider
+from app.rag.vectorstore.factory import get_vector_store
+from app.research.search.factory import create_search_provider
 from app.schemas.common import ErrorResponse
+from app.schemas.agentic import (
+    AgenticInvestigationRequest,
+    AgenticInvestigationResult,
+)
 from app.schemas.investigation import (
     AIInvestigationResponse,
     InvestigationRequest,
     InvestigationResponse,
 )
+from app.schemas.research import (
+    InvestigationResearchRequest,
+    InvestigationResearchResponse,
+)
 from app.services.ai_investigation_service import AIInvestigationService
 from app.services.investigation_service import InvestigationPlanner
+from app.services.investigation_research_service import (
+    InvestigationResearchService,
+)
+from app.services.rag_indexing_service import RAGIndexingService
+from app.services.rag_retrieval_service import RAGRetrievalService
 
 router = APIRouter(prefix="/api/v1", tags=["investigations"])
 planner = InvestigationPlanner()
@@ -68,4 +90,104 @@ async def create_ai_investigation_plan(
         await provider.aclose()
 
 
+@router.post(
+    "/investigations/research",
+    response_model=InvestigationResearchResponse,
+    responses={
+        422: {
+            "model": ErrorResponse,
+            "description": "The bounded research request failed validation.",
+        },
+        500: {
+            "model": ErrorResponse,
+            "description": "Provider configuration is invalid.",
+        },
+        502: {
+            "model": ErrorResponse,
+            "description": "A research or evidence provider failed.",
+        },
+    },
+)
+async def research_investigation(
+    request: InvestigationResearchRequest,
+) -> InvestigationResearchResponse:
+    search_provider = create_search_provider("gemini_grounded")
+    evidence_extractor = None
+    try:
+        evidence_extractor = create_evidence_extractor()
+        service = InvestigationResearchService(
+            search_provider=search_provider,
+            evidence_extractor=evidence_extractor,
+        )
+        return await service.research(request)
+    finally:
+        if evidence_extractor is not None:
+            await evidence_extractor.aclose()
+        await search_provider.aclose()
+
+
+@router.post(
+    "/investigations/agentic",
+    response_model=AgenticInvestigationResult,
+    responses={
+        422: {
+            "model": ErrorResponse,
+            "description": "The bounded agentic request failed validation.",
+        },
+        500: {
+            "model": ErrorResponse,
+            "description": "Provider configuration is invalid.",
+        },
+        502: {
+            "model": ErrorResponse,
+            "description": "An agent provider failed before partial output.",
+        },
+    },
+)
+async def run_agentic_investigation(
+    request: AgenticInvestigationRequest,
+) -> AgenticInvestigationResult:
+    search_provider = create_search_provider("gemini_grounded")
+    evidence_extractor = None
+    embedding_provider = None
+    try:
+        evidence_extractor = create_evidence_extractor()
+        rag_indexing_service = None
+        rag_retrieval_service = None
+        if request.use_rag:
+            embedding_provider = create_embedding_provider()
+            vector_store = get_vector_store()
+            rag_indexing_service = RAGIndexingService(
+                embedding_provider,
+                vector_store,
+            )
+            rag_retrieval_service = RAGRetrievalService(
+                embedding_provider,
+                vector_store,
+            )
+        research_agent = ResearchAgent(search_provider)
+        evidence_agent = EvidenceAgent(evidence_extractor)
+        critic_agent = CriticAgent(
+            research_agent=research_agent,
+            evidence_agent=evidence_agent,
+            rag_indexing_service=rag_indexing_service,
+            rag_retrieval_service=rag_retrieval_service,
+        )
+        orchestrator = InvestigationOrchestrator(
+            research_agent=research_agent,
+            evidence_agent=evidence_agent,
+            critic_agent=critic_agent,
+            rag_indexing_service=rag_indexing_service,
+            rag_retrieval_service=rag_retrieval_service,
+        )
+        return await orchestrator.investigate(request)
+    finally:
+        if embedding_provider is not None:
+            await embedding_provider.aclose()
+        if evidence_extractor is not None:
+            await evidence_extractor.aclose()
+        await search_provider.aclose()
+
+
 router.include_router(research_router)
+router.include_router(rag_router)

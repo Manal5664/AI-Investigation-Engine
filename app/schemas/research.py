@@ -1,11 +1,18 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import Field, HttpUrl, StringConstraints, model_validator
 
-from app.schemas.evidence import EvidenceItem, EvidenceStanceCounts
+from app.schemas.evidence import (
+    EvidenceConflictReport,
+    EvidenceItem,
+    EvidenceStanceCounts,
+    EvidenceSummary,
+    ProviderFailure,
+)
 from app.schemas.investigation import (
     InvestigationDepth,
+    InvestigationPlan,
     InvestigationSubQuestion,
     QueryText,
     StrictModel,
@@ -103,3 +110,34 @@ class WebResearchResult(StrictModel):
     grounded_summary: str | None = Field(default=None, min_length=1)
     grounding_metadata: WebGroundingMetadata
     warnings: list[str]
+
+
+class InvestigationResearchRequest(StrictModel):
+    query: QueryText
+    depth: InvestigationDepth = InvestigationDepth.QUICK
+    max_sub_questions: int = Field(default=2, ge=1, le=2)
+    max_sources_per_question: int = Field(default=3, ge=1, le=3)
+
+
+class InvestigationQuestionResearchResult(StrictModel):
+    sub_question: InvestigationSubQuestion
+    sources: list[Source]
+    grounded_summary: str | None = Field(default=None, min_length=1)
+    evidence_items: list[EvidenceItem]
+    stance_counts: EvidenceStanceCounts
+    conflicts: EvidenceConflictReport
+    warnings: list[str]
+
+
+class InvestigationResearchResponse(StrictModel):
+    status: Literal["completed", "partial", "failed"]
+    plan: InvestigationPlan
+    search_provider_used: str = Field(min_length=1)
+    search_model_used: str = Field(min_length=1)
+    evidence_provider_used: str = Field(min_length=1)
+    evidence_model_used: str = Field(min_length=1)
+    question_results: list[InvestigationQuestionResearchResult]
+    evidence_summary: EvidenceSummary
+    conflicts: list[EvidenceConflictReport]
+    warnings: list[str]
+    error: ProviderFailure | None = None
