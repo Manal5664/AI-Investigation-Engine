@@ -1,0 +1,38 @@
+{% from "partials/status_badge.html" import status_badge %}
+<div class="ai-card ai-evidence-card">
+  <div class="ai-evidence-head">
+    <div class="ai-evidence-summary">{{ item.summary }}</div>
+    <div class="ai-evidence-badges">
+      {{ status_badge(item.stance) }}
+      {{ status_badge(item.strength) }}
+    </div>
+  </div>
+  <div class="ai-evidence-meta">
+    <span><i class="bi bi-file-text" aria-hidden="true"></i> {{ item.extraction_method }}</span>
+    <span><i class="bi bi-cpu" aria-hidden="true"></i> {{ item.model_used or 'unknown' }}</span>
+    <span><i class="bi bi-clock" aria-hidden="true"></i> {{ item.retrieval_timestamp or '—' }}</span>
+    {% if item.page %}
+    <span><i class="bi bi-file-earmark" aria-hidden="true"></i> page {{ item.page }}</span>
+    {% endif %}
+    {% if item.section %}
+    <span><i class="bi bi-pin-angle" aria-hidden="true"></i> {{ item.section }}</span>
+    {% endif %}
+  </div>
+  <details class="ai-evidence-passage">
+    <summary>Relevant passage</summary>
+    <blockquote>{{ item.relevant_passage }}</blockquote>
+  </details>
+  <p class="ai-evidence-rationale">
+    <i class="bi bi-lightbulb" aria-hidden="true"></i>
+    <strong>Rationale:</strong> {{ item.rationale }}
+  </p>
+  <div class="ai-evidence-source">
+    <i class="bi bi-link-45deg" aria-hidden="true"></i>
+    {% if item.source_title %}<strong>{{ item.source_title }}</strong>{% else %}Source {{ item.source_id }}{% endif %}
+    {% if item.source_url %}
+    <a href="{{ item.source_url }}" target="_blank" rel="noopener noreferrer" class="ai-source-link">
+      {{ item.source_url }}
+    </a>
+    {% endif %}
+  </div>
+</div>

@@ -1,0 +1,21 @@
+{% macro status_badge(status) -%}
+{%- set map = {
+  'completed': ('success', 'bi-check-circle-fill', 'Completed'),
+  'partial': ('warning', 'bi-exclamation-triangle-fill', 'Partial'),
+  'failed': ('danger', 'bi-x-circle-fill', 'Failed'),
+  'pending': ('secondary', 'bi-hourglass-split', 'Pending'),
+  'running': ('primary', 'bi-arrow-repeat', 'Running'),
+  'skipped': ('secondary', 'bi-skip-forward-fill', 'Skipped'),
+  'high': ('success', 'bi-shield-fill-check', 'High'),
+  'moderate': ('info', 'bi-shield-fill-exclamation', 'Moderate'),
+  'low': ('warning', 'bi-shield-fill', 'Low'),
+  'insufficient': ('danger', 'bi-shield-fill-x', 'Insufficient'),
+  'supports': ('success', 'bi-hand-thumbs-up-fill', 'Supports'),
+  'contradicts': ('danger', 'bi-hand-thumbs-down-fill', 'Contradicts'),
+  'neutral': ('secondary', 'bi-dash-circle', 'Neutral'),
+} -%}
+{%- set cls, icon, label = map.get(status, ('secondary', 'bi-question-circle', status)) -%}
+<span class="badge ai-badge ai-badge-{{ cls }}" title="{{ status }}">
+  <i class="bi {{ icon }}" aria-hidden="true"></i> {{ label }}
+</span>
+{%- endmacro %}

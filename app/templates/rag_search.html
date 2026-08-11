@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}RAG Search · EvidenceAI{% endblock %}
+{% set nav_active = 'rag' %}
+
+{% block page_title %}RAG Search{% endblock %}
+{% block page_subtitle %}Semantic retrieval over indexed document pages.{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="ai-card">
+      <form id="ragSearchForm" class="mb-2">
+        <div class="mb-3">
+          <label for="ragQuery" class="form-label">Semantic query</label>
+          <textarea id="ragQuery" name="query" class="form-control ai-textarea" rows="2"
+                    minlength="3" required
+                    placeholder="e.g. irregularities in procurement reconciliation"></textarea>
+        </div>
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <label for="ragTopK" class="form-label">Results (<span id="ragTopKLabel">5</span>)</label>
+            <input type="range" class="form-range" id="ragTopK" name="top_k" min="1" max="20" value="5"
+                   aria-label="Number of results">
+          </div>
+          <div class="col-md-6">
+            <label for="ragSourceFilter" class="form-label">Limit to document <span class="ai-hint">(optional)</span></label>
+            <select id="ragSourceFilter" name="source_ids" class="form-select">
+              <option value="">All documents</option>
+              {% for doc in documents %}
+              <option value="{{ doc.document_id }}">{{ doc.filename }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-ai-primary" id="ragSearchSubmit">
+          <i class="bi bi-robot" aria-hidden="true"></i> Search
+        </button>
+        <span class="ai-hint" id="ragError" role="alert"></span>
+      </form>
+    </div>
+
+    <div id="ragResults" class="mt-4"></div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="ai-card">
+      <h3 class="ai-card-title"><i class="bi bi-info-circle" aria-hidden="true"></i> About semantic search</h3>
+      <div class="ai-callout">
+        <i class="bi bi-graph-up" aria-hidden="true"></i>
+        <p><strong>Similarity is not truth.</strong> The score measures contextual closeness between your query and stored chunks — it does not establish factual correctness.</p>
+      </div>
+      <ul class="ai-note-list">
+        <li><i class="bi bi-1-circle" aria-hidden="true"></i> Only documents indexed for RAG are searchable.</li>
+        <li><i class="bi bi-2-circle" aria-hidden="true"></i> Results include source, page, and chunk metadata.</li>
+        <li><i class="bi bi-3-circle" aria-hidden="true"></i> Index documents from the Documents page first.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/rag.js"></script>
+{% endblock %}

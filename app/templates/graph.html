@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Graph View · EvidenceAI{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4">
+  <div>
+    <h1 class="h3 mb-1">Graph view</h1>
+    <p class="text-body-secondary mb-0">
+      Entity relationship graph built from investigations
+      <span class="ai-mono small text-body-tertiary ms-1" id="graphStats"></span>
+    </p>
+  </div>
+  <div class="d-flex align-items-center gap-2">
+    <label for="investigationSelect" class="form-label mb-0 text-body-secondary small">Investigation</label>
+    <select id="investigationSelect" class="form-select form-select-sm w-auto">
+      <option value="">All</option>
+    </select>
+  </div>
+</div>
+
+<div id="graphMessage" class="alert alert-warning d-none"></div>
+
+<div class="ai-graph-toolbar">
+  <div class="ai-graph-legend">
+    <span class="ai-legend-node inv">Investigation</span>
+    <span class="ai-legend-node claim">Claim</span>
+    <span class="ai-legend-node evidence">Evidence</span>
+    <span class="ai-legend-node source">Source</span>
+    <span class="ai-legend-node person" style="--c:#7c3aed"><span class="legend-dot" style="background:#7c3aed"></span>Person</span>
+    <span class="ai-legend-node org" style="--c:#0891b2"><span class="legend-dot" style="background:#0891b2"></span>Org</span>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-9">
+    <div class="card ai-card">
+      <div class="card-body p-0">
+        <div id="graphCanvas" class="ai-cyto"></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3">
+    <div class="card ai-card">
+      <div class="ai-card-head">
+        <h5 class="ai-card-title"><i class="bi bi-info-circle"></i> Inspector</h5>
+      </div>
+      <div class="card-body" id="graphDetails">
+        <div class="text-body-secondary small">Click a node to inspect an entity.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block head %}
+<style>
+  .legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/cytoscape@3.29.2/dist/cytoscape.min.js"></script>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/graph.js"></script>
+{% endblock %}

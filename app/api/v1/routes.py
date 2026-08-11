@@ -1,3 +1,7 @@
+"""Version 1 route definitions for the investigation service."""
+
+import asyncio
+
 from fastapi import APIRouter
 
 from app.agents.critic_agent import CriticAgent
@@ -5,9 +9,12 @@ from app.agents.evidence_agent import EvidenceAgent
 from app.agents.orchestrator import InvestigationOrchestrator
 from app.agents.research_agent import ResearchAgent
 from app.ai.factory import create_llm_provider
+from app.api.v1.documents_routes import router as documents_router
+from app.api.v1.persistence_routes import router as persistence_router
 from app.api.v1.research_routes import router as research_router
 from app.api.v1.rag_routes import router as rag_router
 from app.core.config import settings
+from app.database.provider import get_persistence_provider
 from app.evidence.factory import create_evidence_extractor
 from app.graph.extraction.factory import create_graph_extraction_provider
 from app.graph.factory import get_graph_store
@@ -32,6 +39,9 @@ from app.services.ai_investigation_service import AIInvestigationService
 from app.services.graph_builder_service import GraphBuilderService
 from app.services.graph_rag_service import GraphRAGService
 from app.services.investigation_service import InvestigationPlanner
+from app.services.investigation_persistence_service import (
+    InvestigationPersistenceService,
+)
 from app.services.investigation_research_service import (
     InvestigationResearchService,
 )
@@ -200,7 +210,12 @@ async def run_agentic_investigation(
             graph_builder_service=graph_builder_service,
             graph_rag_service=graph_rag_service,
         )
-        return await orchestrator.investigate(request)
+        result = await orchestrator.investigate(request)
+        persistence_service = InvestigationPersistenceService(
+            get_persistence_provider()
+        )
+        await asyncio.to_thread(persistence_service.save_result, result)
+        return result
     finally:
         if graph_extraction_provider is not None:
             await graph_extraction_provider.aclose()
@@ -213,3 +228,5 @@ async def run_agentic_investigation(
 
 router.include_router(research_router)
 router.include_router(rag_router)
+router.include_router(documents_router)
+router.include_router(persistence_router)

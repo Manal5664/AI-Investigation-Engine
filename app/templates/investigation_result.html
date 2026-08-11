@@ -1,0 +1,381 @@
+{% extends "base.html" %}
+{% import "partials/status_badge.html" as badges %}
+{% import "partials/evidence_card.html" as ev %}
+{% import "partials/source_card.html" as src %}
+{% block title %}Investigation · EvidenceAI{% endblock %}
+{% set nav_active = 'history' %}
+
+{% block page_title %}Investigation{% endblock %}
+{% block page_subtitle %}{{ detail.investigation.query }}{% endblock %}
+
+{% block content %}
+<div class="ai-card ai-result-header">
+  <div class="ai-result-query">
+    <h2>{{ detail.investigation.query }}</h2>
+    <div class="ai-result-meta">
+      <span class="ai-meta-chip"><i class="bi bi-speedometer" aria-hidden="true"></i> {{ detail.investigation.depth }}</span>
+      {% if detail.investigation.category %}<span class="ai-meta-chip"><i class="bi bi-tag" aria-hidden="true"></i> {{ detail.investigation.category }}</span>{% endif %}
+      <span class="ai-meta-chip"><i class="bi bi-cpu" aria-hidden="true"></i> {{ detail.investigation.provider_used or '—' }} / {{ detail.investigation.model_used or '—' }}</span>
+      <span class="ai-meta-chip"><i class="bi bi-clock" aria-hidden="true"></i> {{ detail.investigation.created_at }}</span>
+    </div>
+  </div>
+  <div class="ai-result-badges">
+    {{ badges.status_badge(detail.investigation.status) }}
+    {% if detail.investigation.confidence %}
+    {{ badges.status_badge(detail.investigation.confidence) }}
+    {% endif %}
+  </div>
+</div>
+
+<ul class="nav nav-tabs ai-tabs" id="resultTabs" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active" id="tab-overview" data-bs-toggle="tab" data-bs-target="#pane-overview" type="button" role="tab" aria-controls="pane-overview" aria-selected="true">
+      <i class="bi bi-clipboard-data" aria-hidden="true"></i> Overview
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-evidence" data-bs-toggle="tab" data-bs-target="#pane-evidence" type="button" role="tab" aria-controls="pane-evidence" aria-selected="false">
+      <i class="bi bi-collection" aria-hidden="true"></i> Evidence <span class="ai-tab-count">{{ detail.evidence_items|length }}</span>
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-sources" data-bs-toggle="tab" data-bs-target="#pane-sources" type="button" role="tab" aria-controls="pane-sources" aria-selected="false">
+      <i class="bi bi-link-45deg" aria-hidden="true"></i> Sources <span class="ai-tab-count">{{ detail.sources|length }}</span>
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-conflicts" data-bs-toggle="tab" data-bs-target="#pane-conflicts" type="button" role="tab" aria-controls="pane-conflicts" aria-selected="false">
+      <i class="bi bi-shuffle" aria-hidden="true"></i> Conflicts <span class="ai-tab-count">{{ detail.conflicts|length }}</span>
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-critic" data-bs-toggle="tab" data-bs-target="#pane-critic" type="button" role="tab" aria-controls="pane-critic" aria-selected="false">
+      <i class="bi bi-shield-exclamation" aria-hidden="true"></i> Devil's Advocate
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-graph" data-bs-toggle="tab" data-bs-target="#pane-graph" type="button" role="tab" aria-controls="pane-graph" aria-selected="false">
+      <i class="bi bi-diagram-3" aria-hidden="true"></i> Graph
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-replay" data-bs-toggle="tab" data-bs-target="#pane-replay" type="button" role="tab" aria-controls="pane-replay" aria-selected="false">
+      <i class="bi bi-list-check" aria-hidden="true"></i> Replay
+    </button>
+  </li>
+</ul>
+
+<div class="tab-content ai-tab-content" id="resultTabsContent">
+
+  <!-- Overview -->
+  <div class="tab-pane fade show active" id="pane-overview" role="tabpanel" aria-labelledby="tab-overview">
+    <div class="ai-callout ai-callout-warn">
+      <i class="bi bi-shield-exclamation" aria-hidden="true"></i>
+      <p>This report describes the <strong>evidence picture</strong> gathered for the query. It does not issue an absolute truth verdict, and the confidence label is <strong>not</strong> a probability of the claim being true.</p>
+    </div>
+
+    {% if detail.report %}
+    <div class="ai-card">
+      <h3 class="ai-card-title"><i class="bi bi-journal-text" aria-hidden="true"></i> Evidence picture</h3>
+      <p class="ai-overview-text">{{ detail.report.overall_evidence_picture }}</p>
+    </div>
+
+    <div class="row g-4 mt-1">
+      {% if detail.report.strongest_supporting_evidence %}
+      <div class="col-md-6">
+        <div class="ai-card ai-strong-card support">
+          <h3 class="ai-card-title"><i class="bi bi-check-circle-fill" aria-hidden="true"></i> Strongest supporting evidence</h3>
+          <p class="ai-overview-text">{{ detail.report.strongest_supporting_evidence }}</p>
+        </div>
+      </div>
+      {% endif %}
+      {% if detail.report.strongest_contradicting_evidence %}
+      <div class="col-md-6">
+        <div class="ai-card ai-strong-card contradict">
+          <h3 class="ai-card-title"><i class="bi bi-x-circle-fill" aria-hidden="true"></i> Strongest contradicting evidence</h3>
+          <p class="ai-overview-text">{{ detail.report.strongest_contradicting_evidence }}</p>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="ai-card">
+      <h3 class="ai-card-title"><i class="bi bi-shield-check" aria-hidden="true"></i> Confidence rationale</h3>
+      <p class="ai-overview-text">{{ detail.report.confidence_rationale }}</p>
+    </div>
+
+    <div class="row g-4 mt-1">
+      <div class="col-md-6">
+        <div class="ai-card">
+          <h3 class="ai-card-title"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i> Important limitations</h3>
+          {% if detail.report.important_limitations %}
+          <ul class="ai-bullets">
+            {% for item in detail.report.important_limitations %}<li>{{ item }}</li>{% endfor %}
+          </ul>
+          {% else %}<p class="ai-muted">None recorded.</p>{% endif %}
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="ai-card">
+          <h3 class="ai-card-title"><i class="bi bi-arrow-left-right" aria-hidden="true"></i> Alternative explanations</h3>
+          {% if detail.report.alternative_explanations %}
+          <ul class="ai-bullets">
+            {% for item in detail.report.alternative_explanations %}<li>{{ item }}</li>{% endfor %}
+          </ul>
+          {% else %}<p class="ai-muted">None recorded.</p>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="ai-card">
+      <h3 class="ai-card-title"><i class="bi bi-graph-up-arrow" aria-hidden="true"></i> Evidence gaps</h3>
+      {% if detail.report.evidence_gaps %}
+      <ul class="ai-bullets">
+        {% for item in detail.report.evidence_gaps %}<li>{{ item }}</li>{% endfor %}
+      </ul>
+      {% else %}<p class="ai-muted">No explicit gaps recorded.</p>{% endif %}
+    </div>
+    {% endif %}
+
+    {% if detail.investigation.warnings or detail.investigation.errors %}
+    <div class="ai-card">
+      <h3 class="ai-card-title"><i class="bi bi-cone-striped" aria-hidden="true"></i> Warnings &amp; errors</h3>
+      {% for warning in detail.investigation.warnings %}
+      <div class="ai-warning-line"><i class="bi bi-exclamation-circle" aria-hidden="true"></i> {{ warning }}</div>
+      {% endfor %}
+      {% for error in detail.investigation.errors %}
+      <div class="ai-warning-line danger"><i class="bi bi-x-circle" aria-hidden="true"></i> {{ error }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="ai-card ai-summary-strip">
+      <span><i class="bi bi-link-45deg" aria-hidden="true"></i> <strong>{{ detail.investigation.total_source_count }}</strong> sources</span>
+      <span><i class="bi bi-collection" aria-hidden="true"></i> <strong>{{ detail.investigation.total_evidence_count }}</strong> evidence items</span>
+      <span><i class="bi bi-list-check" aria-hidden="true"></i> <strong>{{ detail.steps|length }}</strong> agent steps</span>
+    </div>
+  </div>
+
+  <!-- Evidence -->
+  <div class="tab-pane fade" id="pane-evidence" role="tabpanel" aria-labelledby="tab-evidence">
+    {% for group in detail.evidence_groups %}
+    <section class="ai-stance-group" data-stance="{{ group.stance }}">
+      <h3 class="ai-stance-heading ai-stance-{{ group.stance }}">
+        {% if group.stance == 'supports' %}<i class="bi bi-hand-thumbs-up-fill" aria-hidden="true"></i>
+        {% elif group.stance == 'contradicts' %}<i class="bi bi-hand-thumbs-down-fill" aria-hidden="true"></i>
+        {% elif group.stance == 'neutral' %}<i class="bi bi-dash-circle" aria-hidden="true"></i>
+        {% else %}<i class="bi bi-question-circle" aria-hidden="true"></i>{% endif %}
+        {{ group.stance|capitalize }} — {{ group.items|length }}
+      </h3>
+      <div class="row g-4">
+        {% for item in group.items %}
+        <div class="col-lg-6">
+          {% with item=item %}{% include "partials/evidence_card.html" %}{% endwith %}
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+    {% else %}
+    <div class="ai-empty">
+      <i class="bi bi-collection" aria-hidden="true"></i>
+      <p>No evidence items were persisted for this investigation.</p>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Sources -->
+  <div class="tab-pane fade" id="pane-sources" role="tabpanel" aria-labelledby="tab-sources">
+    <div class="ai-callout">
+      <i class="bi bi-shield-check" aria-hidden="true"></i>
+      <p>Credibility scores estimate source quality — they do not establish the truth of any claim.</p>
+    </div>
+    <div class="row g-4">
+      {% for source in detail.sources %}
+      <div class="col-lg-6">
+        {% with source=source %}{% include "partials/source_card.html" %}{% endwith %}
+      </div>
+      {% else %}
+      <div class="col-12">
+        <div class="ai-empty">
+          <i class="bi bi-link-45deg" aria-hidden="true"></i>
+          <p>No sources were persisted for this investigation.</p>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Conflicts -->
+  <div class="tab-pane fade" id="pane-conflicts" role="tabpanel" aria-labelledby="tab-conflicts">
+    {% for conflict in detail.conflicts %}
+    <div class="ai-card ai-conflict-card">
+      <div class="ai-conflict-head">
+        <h3><i class="bi bi-shuffle" aria-hidden="true"></i> Sub-question {{ conflict.sub_question_id }}</h3>
+        {% if conflict.has_supporting_and_contradicting_evidence %}
+        <span class="badge ai-badge ai-badge-warning"><i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i> Conflicting evidence found</span>
+        {% else %}
+        <span class="badge ai-badge ai-badge-success"><i class="bi bi-check-circle-fill" aria-hidden="true"></i> No direct conflict detected</span>
+        {% endif %}
+      </div>
+      {% if conflict.unresolved_conflicts %}
+      <h4 class="ai-conflict-sub">Unresolved conflicts</h4>
+      <ul class="ai-bullets">
+        {% for item in conflict.unresolved_conflicts %}<li>{{ item }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+      {% if conflict.conflicting_source_claims %}
+      <h4 class="ai-conflict-sub">Conflicting source claims</h4>
+      {% for claim in conflict.conflicting_source_claims %}
+      <div class="ai-conflict-claim">
+        <div class="ai-claim-source">
+          <i class="bi bi-file-earmark-text" aria-hidden="true"></i>
+          <div>
+            <strong>{{ claim.get('source_title') or claim.get('source_id') or 'Source' }}</strong>
+            {% if claim.get('source_url') %}<a href="{{ claim['source_url'] }}" target="_blank" rel="noopener noreferrer">{{ claim['source_url'] }}</a>{% endif %}
+          </div>
+        </div>
+        <p class="ai-claim-text">{{ claim.get('claim') or claim.get('summary') or claim.get('stance') or '—' }}</p>
+      </div>
+      {% endfor %}
+      {% endif %}
+      {% if not conflict.unresolved_conflicts and not conflict.conflicting_source_claims %}
+      <p class="ai-muted mb-0">No conflicting source claims recorded.</p>
+      {% endif %}
+    </div>
+    {% else %}
+    <div class="ai-empty">
+      <i class="bi bi-shuffle" aria-hidden="true"></i>
+      <p>No conflict analysis was persisted for this investigation.</p>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Devil's Advocate -->
+  <div class="tab-pane fade" id="pane-critic" role="tabpanel" aria-labelledby="tab-critic">
+    <div class="ai-callout">
+      <i class="bi bi-shield-exclamation" aria-hidden="true"></i>
+      <p>This view assembles the counter-evidence and open questions captured by the investigation's devil's-advocate review.</p>
+    </div>
+
+    {% if detail.report %}
+    <div class="row g-4">
+      <div class="col-md-6">
+        <div class="ai-card ai-critic-card">
+          <h3 class="ai-card-title"><i class="bi bi-arrow-left-right" aria-hidden="true"></i> Alternative explanations</h3>
+          {% if detail.report.alternative_explanations %}
+          <ul class="ai-bullets">{% for item in detail.report.alternative_explanations %}<li>{{ item }}</li>{% endfor %}</ul>
+          {% else %}<p class="ai-muted">None recorded.</p>{% endif %}
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="ai-card ai-critic-card">
+          <h3 class="ai-card-title"><i class="bi bi-question-circle" aria-hidden="true"></i> Evidence gaps</h3>
+          {% if detail.report.evidence_gaps %}
+          <ul class="ai-bullets">{% for item in detail.report.evidence_gaps %}<li>{{ item }}</li>{% endfor %}</ul>
+          {% else %}<p class="ai-muted">No explicit gaps recorded.</p>{% endif %}
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="ai-card ai-critic-card">
+          <h3 class="ai-card-title"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i> Limitations</h3>
+          {% if detail.report.important_limitations %}
+          <ul class="ai-bullets">{% for item in detail.report.important_limitations %}<li>{{ item }}</li>{% endfor %}</ul>
+          {% else %}<p class="ai-muted">None recorded.</p>{% endif %}
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="ai-card ai-critic-card">
+          <h3 class="ai-card-title"><i class="bi bi-unlock" aria-hidden="true"></i> Unresolved conflicts</h3>
+          {% if detail.report.unresolved_conflicts %}
+          <ul class="ai-bullets">{% for item in detail.report.unresolved_conflicts %}<li>{{ item }}</li>{% endfor %}</ul>
+          {% else %}<p class="ai-muted">No unresolved conflicts recorded.</p>{% endif %}
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="ai-card ai-critic-card">
+      <h3 class="ai-card-title"><i class="bi bi-hand-thumbs-down-fill" aria-hidden="true"></i> Opposing evidence</h3>
+      {% set opposing = detail.opposing_evidence %}
+      {% if opposing %}
+      <div class="row g-4">
+        {% for item in opposing %}
+        <div class="col-lg-6">
+          {% with item=item %}{% include "partials/evidence_card.html" %}{% endwith %}
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="ai-empty">
+        <i class="bi bi-hand-thumbs-up" aria-hidden="true"></i>
+        <p>No contradicting evidence was found in the persisted evidence base.</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Graph -->
+  <div class="tab-pane fade" id="pane-graph" role="tabpanel" aria-labelledby="tab-graph">
+    <div class="ai-card">
+      <div class="ai-card-head">
+        <h3 class="ai-card-title"><i class="bi bi-diagram-3" aria-hidden="true"></i> Investigation graph</h3>
+        <div class="ai-graph-legend">
+          <span class="ai-legend-node inv">Investigation</span>
+          <span class="ai-legend-node claim">Claim</span>
+          <span class="ai-legend-node evidence">Evidence</span>
+          <span class="ai-legend-node source">Source</span>
+        </div>
+      </div>
+      <div id="resultGraph" class="ai-cyto" role="img" aria-label="Investigation knowledge graph"></div>
+    </div>
+  </div>
+
+  <!-- Replay -->
+  <div class="tab-pane fade" id="pane-replay" role="tabpanel" aria-labelledby="tab-replay">
+    <div class="ai-callout">
+      <i class="bi bi-info-circle" aria-hidden="true"></i>
+      <p>Public agent audit trail — step names, statuses, timestamps, and provider metadata only. No chain-of-thought or private reasoning is shown.</p>
+    </div>
+    <div class="ai-timeline">
+      {% for step in detail.steps %}
+      <div class="ai-timeline-item" data-step-id="{{ step.step_id }}">
+        <div class="ai-timeline-marker ai-marker-{{ step.status }}" aria-hidden="true">
+          <i class="bi {% if step.status == 'completed' %}bi-check-lg{% elif step.status == 'failed' %}bi-x{% elif step.status == 'partial' %}bi-dash{% elif step.status == 'skipped' %}bi-skip{% else %}bi-arrow-repeat{% endif %}"></i>
+        </div>
+        <div class="ai-timeline-body">
+          <div class="ai-timeline-head">
+            <h3>{{ step.step_name }}</h3>
+            {{ badges.status_badge(step.status) }}
+          </div>
+          <p class="ai-timeline-action">{{ step.action_summary }}</p>
+          <div class="ai-timeline-meta">
+            <span><i class="bi bi-cpu" aria-hidden="true"></i> {{ step.provider_used or '—' }} / {{ step.model_used or '—' }}</span>
+            <span><i class="bi bi-clock" aria-hidden="true"></i> {{ step.started_at }} → {{ step.completed_at }}</span>
+            <span><i class="bi bi-link-45deg" aria-hidden="true"></i> {{ step.source_count }} sources · {{ step.evidence_count }} evidence</span>
+          </div>
+          {% if step.warnings %}
+          <div class="ai-timeline-warnings">
+            {% for warning in step.warnings %}<span class="ai-warning-line"><i class="bi bi-exclamation-circle" aria-hidden="true"></i> {{ warning }}</span>{% endfor %}
+          </div>
+          {% endif %}
+        </div>
+      </div>
+      {% else %}
+      <div class="ai-empty">
+        <i class="bi bi-list-check" aria-hidden="true"></i>
+        <p>No audit steps were persisted for this investigation.</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+</div>
+
+<script type="application/json" id="investigationDetail">
+{{ detail|tojson }}
+</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/investigation.js"></script>
+{% endblock %}

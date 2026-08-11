@@ -1,0 +1,30 @@
+<div class="ai-card ai-source-card">
+  <div class="ai-source-head">
+    <div>
+      <h4 class="ai-source-title">{{ source.title }}</h4>
+      <p class="ai-source-sub">
+        {% if source.publisher %}{{ source.publisher }}{% elif source.domain %}{{ source.domain }}{% endif %}
+        {% if source.author %} · {{ source.author }}{% endif %}
+        {% if source.published_at %} · {{ source.published_at }}{% endif %}
+      </p>
+    </div>
+    <span class="badge ai-badge ai-badge-info" title="Source type">
+      <i class="bi bi-collection" aria-hidden="true"></i> {{ source.source_type }}
+    </span>
+  </div>
+  {% if source.snippet %}
+  <p class="ai-source-snippet">{{ source.snippet }}</p>
+  {% endif %}
+  <div class="ai-source-meta">
+    <a href="{{ source.url }}" target="_blank" rel="noopener noreferrer" class="ai-source-link">
+      <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i> {{ source.domain }}<span class="ai-source-full-url">{{ source.url }}</span>
+    </a>
+    <span class="ai-source-retrieved"><i class="bi bi-clock" aria-hidden="true"></i> Retrieved {{ source.retrieved_at }}</span>
+  </div>
+  {% if source.credibility %}
+  <div class="ai-source-credibility" title="Credibility score estimates source quality; it does not establish truth.">
+    <i class="bi bi-shield-check" aria-hidden="true"></i>
+    Credibility score: <strong>{{ source.credibility }}</strong>
+  </div>
+  {% endif %}
+</div>

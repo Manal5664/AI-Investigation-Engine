@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · EvidenceAI{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4">
+  <div>
+    <h1 class="h3 mb-1">Dashboard</h1>
+    <p class="text-body-secondary mb-0">Live overview of the investigation engine.</p>
+  </div>
+  <div id="noDataCta" class="d-none">
+    <a href="/investigate" class="btn btn-primary">
+      <i class="bi bi-plus-lg me-1"></i> Start an investigation
+    </a>
+  </div>
+</div>
+
+<div id="dashboardError" class="alert alert-danger d-none"></div>
+
+<div class="ai-stat-grid mb-4">
+  <a class="ai-stat-card" href="/history">
+    <span class="ai-stat-icon indigo"><i class="bi bi-search"></i></span>
+    <span>
+      <span class="ai-stat-value" id="statTotal">0</span>
+      <span class="ai-stat-label d-block">Investigations</span>
+    </span>
+  </a>
+  <div class="ai-stat-card">
+    <span class="ai-stat-icon emerald"><i class="bi bi-check2-circle"></i></span>
+    <span>
+      <span class="ai-stat-value" id="statComplete">0</span>
+      <span class="ai-stat-label d-block">Completed</span>
+    </span>
+  </div>
+  <div class="ai-stat-card">
+    <span class="ai-stat-icon amber"><i class="bi bi-hourglass-split"></i></span>
+    <span>
+      <span class="ai-stat-value" id="statPartial">0</span>
+      <span class="ai-stat-label d-block">Partial</span>
+    </span>
+  </div>
+  <div class="ai-stat-card">
+    <span class="ai-stat-icon violet"><i class="bi bi-folder2-open"></i></span>
+    <span>
+      <span class="ai-stat-value" id="statDocs">0</span>
+      <span class="ai-stat-label d-block">Documents</span>
+    </span>
+  </div>
+</div>
+
+<div class="ai-stat-grid ai-stat-grid-sm mb-4">
+  <div class="ai-stat-card">
+    <span class="ai-stat-icon cyan"><i class="bi bi-globe2"></i></span>
+    <span>
+      <span class="ai-stat-value ai-stat-value-sm" id="statSources">0</span>
+      <span class="ai-stat-label d-block">Sources</span>
+    </span>
+  </div>
+  <div class="ai-stat-card">
+    <span class="ai-stat-icon emerald"><i class="bi bi-lightbulb"></i></span>
+    <span>
+      <span class="ai-stat-value ai-stat-value-sm" id="statEvidence">0</span>
+      <span class="ai-stat-label d-block">Evidence items</span>
+    </span>
+  </div>
+  <div class="ai-stat-card">
+    <span class="ai-stat-icon indigo"><i class="bi bi-database"></i></span>
+    <span>
+      <span class="ai-stat-value ai-stat-value-sm" id="statVectors">0</span>
+      <span class="ai-stat-label d-block">RAG vectors</span>
+    </span>
+  </div>
+  <div class="ai-stat-card">
+    <span class="ai-stat-icon violet"><i class="bi bi-diagram-3"></i></span>
+    <span>
+      <span class="ai-stat-value ai-stat-value-sm" id="statGraphNodes">0</span>
+      <span class="ai-stat-label d-block">Graph nodes</span>
+    </span>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-xl-8">
+    <div class="card ai-card h-100">
+      <div class="ai-card-head">
+        <div>
+          <h5 class="ai-card-title"><i class="bi bi-bar-chart-line"></i> Investigations &amp; documents</h5>
+          <p class="ai-card-sub mb-0">Last 14 days</p>
+        </div>
+      </div>
+      <div class="ai-chart-wrap"><canvas id="chartTrend"></canvas></div>
+    </div>
+  </div>
+  <div class="col-xl-4">
+    <div class="card ai-card h-100">
+      <div class="ai-card-head">
+        <h5 class="ai-card-title"><i class="bi bi-pie-chart"></i> By status</h5>
+      </div>
+      <div class="ai-chart-wrap"><canvas id="chartStatus"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-xl-6">
+    <div class="card ai-card h-100">
+      <div class="ai-card-head">
+        <h5 class="ai-card-title"><i class="bi bi-files"></i> Documents by kind</h5>
+      </div>
+      <div class="ai-chart-wrap"><canvas id="chartSources"></canvas></div>
+    </div>
+  </div>
+  <div class="col-xl-6">
+    <div class="card ai-card h-100">
+      <div class="ai-card-head">
+        <h5 class="ai-card-title"><i class="bi bi-clock-history"></i> Recent investigations</h5>
+        <a class="ai-link" href="/history">View all</a>
+      </div>
+      <div class="table-responsive ai-table">
+        <table class="table table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Query</th>
+              <th>Status</th>
+              <th>Confidence</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody id="recentBody">
+            <tr>
+              <td colspan="4" class="text-center text-body-secondary py-4">Loading…</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/dashboard.js"></script>
+{% endblock %}

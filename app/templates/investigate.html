@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}New Investigation · EvidenceAI{% endblock %}
+{% block content %}
+
+<div class="row justify-content-center">
+  <div class="col-lg-9 col-xl-7">
+    <div class="mb-4">
+      <h1 class="h3 mb-1">New investigation</h1>
+      <p class="text-body-secondary mb-0">
+        Describe the question. The agentic engine will research it, weigh the evidence,
+        and produce a report. Runs in the foreground, so give it time.
+      </p>
+    </div>
+
+    <div class="card ai-card ai-investigate-card mb-4">
+      <div class="card-body">
+        <form id="investigateForm" novalidate>
+          <div class="mb-3">
+            <label for="query" class="form-label fw-semibold">Investigation question <span class="text-danger">*</span></label>
+            <textarea
+              class="form-control ai-textarea"
+              id="query"
+              name="query"
+              rows="4"
+              minlength="5"
+              placeholder="e.g. Did the vendor overcharge for services in Q2, and who authorized it?"
+              required
+            ></textarea>
+            <div class="ai-hint mt-1">At least 5 characters.</div>
+          </div>
+
+          <div class="mb-3">
+            <label for="depth" class="form-label fw-semibold">Depth</label>
+            <select class="form-select" id="depth" name="depth">
+              <option value="quick" selected>Quick — fast overview, fewer sub-questions</option>
+              <option value="standard">Standard — balanced coverage</option>
+              <option value="deep">Deep — maximum sub-questions and sources</option>
+            </select>
+          </div>
+
+          <div class="ai-option-group mb-3">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="runCritic" checked />
+              <label class="form-check-label" for="runCritic">
+                Critic review
+                <span class="ai-hint">Challenge assumptions and hunt for opposing evidence.</span>
+              </label>
+            </div>
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="useRag" />
+              <label class="form-check-label" for="useRag">
+                Use RAG (document base)
+                <span class="ai-hint">Index and retrieve evidence from uploaded documents.</span>
+              </label>
+            </div>
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="useGraphRag" />
+              <label class="form-check-label" for="useGraphRag">
+                Use graph RAG
+                <span class="ai-hint">Build an entity graph and reason over it (requires RAG).</span>
+              </label>
+            </div>
+          </div>
+
+          <div id="investigateProgress" class="d-none mb-3">
+            <div class="progress ai-progress mb-2">
+              <div class="progress-bar progress-bar-striped progress-bar-animated" id="investigateProgressBar" role="progressbar" style="width: 0%"></div>
+            </div>
+            <div class="small text-body-secondary" id="investigateProgressText">Working…</div>
+          </div>
+
+          <div class="d-flex align-items-center gap-2">
+            <button type="submit" class="btn btn-ai-primary" id="investigateSubmit">
+              <span class="spinner-border spinner-border-sm d-none" role="status"></span>
+              <span>Run investigation</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card ai-card">
+      <div class="ai-card-head">
+        <h5 class="ai-card-title"><i class="bi bi-info-circle"></i> How it works</h5>
+      </div>
+      <div class="card-body">
+        <ol class="ai-bullets mb-0">
+          <li><strong>Plan</strong> — the question is decomposed into sub-questions.</li>
+          <li><strong>Research</strong> — grounded web search gathers sources per sub-question.</li>
+          <li><strong>Extract</strong> — evidence items with stance and strength are pulled from sources.</li>
+          <li><strong>Critique</strong> — assumptions are challenged and opposing evidence sought.</li>
+          <li><strong>Synthesize</strong> — a report with confidence and evidence gaps is produced.</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/investigate.js"></script>
+{% endblock %}

@@ -33,6 +33,12 @@ class SourceMetadata(StrictModel):
     retrieval_model: str | None = None
     retrieval_query: str | None = None
     grounding_citation_count: int | None = Field(default=None, ge=0)
+    document_id: str | None = Field(
+        default=None,
+        pattern=r"^doc-[0-9a-f]{12,64}$",
+    )
+    document_filename: str | None = Field(default=None, min_length=1)
+    document_page: int | None = Field(default=None, ge=1)
 
 
 class SourceCredibility(StrictModel):

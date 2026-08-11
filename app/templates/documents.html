@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Documents · EvidenceAI{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4">
+  <div>
+    <h1 class="h3 mb-1">Documents</h1>
+    <p class="text-body-secondary mb-0">Evidence base — upload transcripts, exhibits, and reports.</p>
+  </div>
+  <span class="ai-mono text-body-secondary">Total: <span id="docCount">0</span></span>
+</div>
+
+<div id="docError" class="alert alert-danger d-none"></div>
+
+<div class="row g-3 mb-4">
+  <div class="col-lg-4 col-xl-3">
+    <div class="card ai-card">
+      <div class="ai-card-head">
+        <h5 class="ai-card-title"><i class="bi bi-upload"></i> Upload evidence</h5>
+      </div>
+      <div class="card-body">
+        <form id="uploadForm">
+          <div class="mb-3">
+            <label for="documentFile" class="form-label fw-semibold">Files</label>
+            <input type="file" class="form-control" id="documentFile" name="files" multiple required />
+            <div class="ai-hint mt-1">PDF, DOCX, TXT, and image files are supported.</div>
+          </div>
+          <button type="submit" class="btn btn-ai-primary w-100" id="uploadBtn">
+            <span class="spinner-border spinner-border-sm d-none" role="status"></span>
+            Upload
+          </button>
+          <div id="uploadResult" class="small mt-2 d-none"></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-8 col-xl-9">
+    <div class="card ai-card">
+      <div class="ai-card-head">
+        <h5 class="ai-card-title"><i class="bi bi-folder2-open"></i> Stored documents</h5>
+        <div class="ai-search-form w-100">
+          <div class="input-group">
+            <span class="input-group-text ai-search-icon"><i class="bi bi-search"></i></span>
+            <input
+              type="search"
+              class="form-control"
+              id="docFilter"
+              placeholder="Filter by filename…"
+              value="{{ request.query_params.get('q', '') }}"
+            />
+          </div>
+        </div>
+      </div>
+      <div class="row g-3" id="docGrid">
+        <div class="col-12 text-center text-body-secondary py-5">Loading…</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/documents.js"></script>
+{% endblock %}

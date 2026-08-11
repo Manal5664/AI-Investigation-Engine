@@ -301,6 +301,16 @@ class InMemoryGraphStore(GraphStore):
                 self._nodes.pop(node_id, None)
             return removed
 
+    async def has_document(self, document_id: str) -> bool:
+        normalized_id = document_id.strip()
+        if not normalized_id:
+            raise ValueError("document_id must not be empty")
+        async with self._lock:
+            return any(
+                node.metadata.get("document_id") == normalized_id
+                for node in self._nodes.values()
+            )
+
     async def clear(self) -> int:
         async with self._lock:
             removed = len(self._nodes) + len(self._edges)

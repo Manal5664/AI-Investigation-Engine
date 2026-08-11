@@ -7,7 +7,10 @@ the default; an opt-in Google Gemini adapter can make real model calls when
 explicitly configured with an API key and model name. A separate opt-in Gemini
 Google Search grounding path returns normalized, citation-backed web sources.
 An independently configured Gemini evidence adapter can classify only the
-source material supplied to it and preserve validated provenance.
+source material supplied to it and preserve validated provenance. Persisted
+users, investigations, and documents can be stored in process memory by
+default or in a SQLAlchemy-backed relational database, with an Alembic
+migration set for the relational schema.
 
 ## Current features
 
@@ -41,12 +44,34 @@ source material supplied to it and preserve validated provenance.
   retrieval, and duplicate-safe in-memory vector indexing.
 - Optional RAG grounding in the agentic workflow through `use_rag`.
 - Structured evidence summaries without final truth verdicts.
+- Multipart document upload (PDF, DOCX, text/markdown, images) with type,
+  size, and hash validation plus duplicate detection.
+- Page-preserving extraction with a pluggable vision provider for image
+  documents and scanned pages.
+- Document content mapped into the shared knowledge graph as evidence and
+  topic nodes with page/section provenance.
+- Page-granular semantic indexing and retrieval of documents through the
+  existing vector store.
+- Document-grounded investigations that plan, gather excerpts, and synthesize
+  a cited report strictly from stored documents.
 - Pytest and HTTP-level ASGI endpoint tests.
+- Persistence layer for users, investigations, and documents behind a
+  provider-neutral repository interface.
+- In-memory persistence by default for tests and development, plus an opt-in
+  SQLAlchemy provider for PostgreSQL or SQLite.
+- Alembic migrations for the relational schema, run against `DATABASE_URL`.
+- HTTP endpoints for creating users, listing/detailing/deleting persisted
+  investigations, and listing/deleting persisted documents.
+- Agentic runs persist their full audit trail, sources, evidence items,
+  conflicts, and synthesis report; uploaded documents persist to the same
+  repository, which doubles as a fallback read source after store resets.
 
 Gemini planning, Gemini Google Search grounding, Gemini evidence extraction,
 and Gemini embeddings are the optional external integrations. No third-party
 search SDK, autonomous crawler, external vector database, authentication layer,
-or persistence service is connected.
+or message bus is connected. Persistence itself is local (in memory or a
+database the operator provisions); the service does not ship an authentication
+layer.
 
 ## Architecture
 
@@ -125,6 +150,116 @@ content hash. Retrieval returns those same values. Before retrieved text reaches
 the existing evidence agent, the orchestrator verifies the source ID/URL pair,
 title, content hash, and verbatim membership in the normalized source content.
 It never invents or repairs source provenance.
+
+### Document management subsystem
+
+```text
+Upload (multipart)
+  ↓
+Validator (type, size, hash, duplicates)
+  ↓
+Extractor (text / pdf / docx / image + vision)
+  ↓
+In-Memory Document Store
+  ├── Page-granular RAG indexing → Vector Store
+  └── Graph mapping (evidence + topic nodes) → Graph Store
+        ↓
+Document-grounded investigation report
+```
+
+Uploads are validated by extension and detected MIME type, bounded by
+`DOCUMENT_MAX_UPLOAD_BYTES`, `DOCUMENT_MAX_PAGES`, and
+`DOCUMENT_MAX_PER_REQUEST`, and deduplicated by SHA-256 content hash. PDF and
+DOCX extraction reads only the package's own text/content streams; no embedded
+scripts, macros, or network resources are executed. Image documents are passed
+to a `VisionProvider` (`VISION_PROVIDER=mock` for deterministic offline output,
+`gemini` for a real multimodal model) that returns a description, visible text,
+and recognized objects.
+
+Every extracted page becomes an `evidence` node in the shared graph, chained to
+consecutive pages, with optional `topic` section nodes linked to their page.
+Documents can also be indexed page-by-page into the existing vector store, so
+`DocumentRAGService` recalls `(document_id, page_number)` pairs for a query. A
+document-grounded investigation reuses the deterministic planner, gathers the
+most relevant excerpts plus graph-derived notes, and asks a configured report
+generator to synthesize findings that quote those excerpts. The report always
+reports `provider_used`, `model_used`, and `fallback_used`.
+
+When `EVIDENCE_INCLUDE_DOCUMENTS=true`, the evidence pipeline is wrapped with
+`PageAwareEvidenceExtractor`: page excerpts from stored documents (RAG-ranked
+when embeddings are configured) are converted to page-granular `Source`
+records and passed to the configured evidence extractor alongside web sources.
+
+### Persistence subsystem
+
+```text
+Routes / services
+      ↓  (async)
+DocumentPersistenceGateway ── InvestigationPersistenceService
+      ↓                                 ↓
+Unit of Work (transaction boundary)
+      ↓
+Repositories (users, investigations, documents, sources, evidence)
+      ↓
+In-Memory Repositories (default)   |   SQLAlchemy Repositories (opt-in)
+                                    ↓
+                           users, investigations, investigation_steps,
+                           sources, evidence_items, conflicts,
+                           investigation_reports, documents, document_pages
+```
+
+`PERSISTENCE_PROVIDER` selects the backing store:
+
+- `in_memory` (default) keeps every entity in process memory. This is the
+  offline development and test fallback and requires no database.
+- `sqlalchemy` persists to the relational database named by `DATABASE_URL`.
+  PostgreSQL is intended for real use; SQLite works for local development.
+
+Repository implementations return and accept typed records from
+`app/schemas/persistence.py`; the SQLAlchemy implementations map those records
+to/from ORM models (`app/database/models`) and never leak sessions or ORM
+objects into routes. Every write goes through a unit of work that commits on
+success and rolls back on failure. Async callers use
+`DocumentPersistenceGateway` and the persistence routes, which marshal
+synchronous SQLAlchemy work onto a worker thread via `asyncio.to_thread`.
+
+The relational schema is owned by Alembic. Generate or refresh migrations with:
+
+```powershell
+$env:DATABASE_URL="sqlite:///./ai_investigation.db"
+alembic revision --autogenerate -m "describe the change"
+alembic upgrade head
+```
+
+`alembic check` verifies that the schema and the models are in sync.
+`reset_persistence()` clears the in-memory provider between automated tests.
+
+### Browser UI workspace
+
+The same FastAPI process serves a browser UI for case management. The UI is a
+thin layer over the real engine — every page and JSON endpoint reads live data
+from the pluggable `PERSISTENCE_PROVIDER` and the document/vector/graph stores
+that back `/api/v1`. There is no separate UI database or background worker.
+
+```text
+Browser (Jinja2 templates + vanilla JS)
+      ↓
+UI routes (app/api/ui_routes.py)
+      ├── Pages      /dashboard, /investigate, /documents, /history,
+      │              /rag, /graph, /investigation/{id}, export
+      ├── JSON API   /api/dashboard (aggregate), /api/graph,
+      │              /api/investigations/run
+      └── Live reads real engine stores (repositories, document/vector/graph
+          stores) and reuses the /api/v1 endpoints for list/detail/delete,
+          document upload, and RAG search
+```
+
+The `/api/dashboard` endpoint aggregates counts, a 14-day trend, and recent
+investigations straight from the persistence repository. Submitting the
+"Run investigation" form calls `/api/investigations/run`, which mirrors the
+`/api/v1/investigations/agentic` agentic flow and then persists the result, so
+the browser can navigate straight to the new `/investigation/{id}` page.
+Results can be exported per investigation as CSV or JSON.
 
 ### Deterministic and AI-provider flows
 
@@ -275,12 +410,48 @@ AI-Investigation-Engine/
 │   │   ├── routes.py
 │   │   └── v1/
 │   │       ├── __init__.py
+│   │       ├── documents_routes.py
+│   │       ├── persistence_routes.py
 │   │       ├── research_routes.py
 │   │       └── routes.py
 │   ├── core/
 │   │   ├── __init__.py
 │   │   ├── config.py
 │   │   └── exceptions.py
+│   ├── database/
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   ├── mapping.py
+│   │   ├── persistence_gateway.py
+│   │   ├── provider.py
+│   │   ├── session.py
+│   │   ├── uow.py
+│   │   ├── models/
+│   │   │   ├── conflict.py
+│   │   │   ├── document.py
+│   │   │   ├── document_page.py
+│   │   │   ├── evidence_item.py
+│   │   │   ├── investigation.py
+│   │   │   ├── investigation_report.py
+│   │   │   ├── investigation_step.py
+│   │   │   ├── source.py
+│   │   │   └── user.py
+│   │   └── repositories/
+│   │       ├── base.py
+│   │       ├── inmemory.py
+│   │       └── sqlalchemy.py
+│   ├── documents/
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   ├── factory.py
+│   │   ├── mappers.py
+│   │   ├── models.py
+│   │   ├── reporting.py
+│   │   ├── reporting_factory.py
+│   │   ├── store.py
+│   │   ├── validators.py
+│   │   ├── extractors/
+│   │   └── vision/
 │   ├── evidence/
 │   │   ├── __init__.py
 │   │   ├── base.py
@@ -295,6 +466,7 @@ AI-Investigation-Engine/
 │   ├── schemas/
 │   │   ├── __init__.py
 │   │   ├── common.py
+│   │   ├── documents.py
 │   │   ├── evidence.py
 │   │   ├── investigation.py
 │   │   ├── research.py
@@ -302,15 +474,41 @@ AI-Investigation-Engine/
 │   └── services/
 │       ├── __init__.py
 │       ├── ai_investigation_service.py
+│       ├── document_graph_service.py
+│       ├── document_ingestion_service.py
+│       ├── document_investigation_service.py
+│       ├── document_rag_service.py
 │       ├── evidence_summary_service.py
+│       ├── investigation_persistence_service.py
 │       ├── investigation_service.py
 │       ├── research_service.py
 │       └── source_credibility_service.py
+├── ui/
+│   ├── __init__.py
+│   ├── database.py
+│   └── worker.py
+├── static/
+│   ├── css/app.css
+│   └── js/{app,api,dashboard,investigate,investigation,documents,history,rag,graph}.js
+├── templates/
+│   ├── base.html
+│   └── {dashboard,investigate,documents,history,rag,graph,investigation,error}.html
+├── tests/
+│   └── test_api.py
+├── alembic/
+│   ├── env.py
+│   ├── script.py.mako
+│   └── versions/
+│       └── <initial persistence schema>
+├── alembic.ini
 ├── tests/
 │   ├── __init__.py
 │   ├── test_ai_provider.py
 │   ├── test_ai_service.py
 │   ├── test_api.py
+│   ├── test_agentic_workflow.py
+│   ├── test_database_persistence.py
+│   ├── test_documents.py
 │   ├── test_evidence_pipeline.py
 │   ├── test_investigation_planner.py
 │   ├── test_research_api.py
@@ -333,6 +531,10 @@ state and replay schemas in `app/schemas/agentic.py`.
 Phase 7 retrieval code lives in `app/rag/`, with typed public schemas in
 `app/schemas/rag.py`, HTTP routes in `app/api/v1/rag_routes.py`, and indexing
 and retrieval application services under `app/services/`.
+The document management subsystem lives in `app/documents/` with page-aware
+graph mapping, page-granular RAG indexing, vision-backed image extraction, and
+document-grounded investigation services wired through
+`app/api/v1/documents_routes.py`.
 
 ## Run locally
 
@@ -342,6 +544,10 @@ root:
 ```powershell
 python -m uvicorn app.main:app --reload
 ```
+
+The same process serves the browser UI. Open `http://127.0.0.1:8000/dashboard`
+to land on the case-management dashboard, or start from
+`http://127.0.0.1:8000/`.
 
 Interactive OpenAPI documentation is available at:
 
@@ -370,6 +576,16 @@ The application reads these optional environment variables:
 | `VECTOR_STORE_PROVIDER` | `in_memory` |
 | `RAG_CHUNK_SIZE` | `1000` |
 | `RAG_CHUNK_OVERLAP` | `200` |
+| `DOCUMENT_STORE_PROVIDER` | `in_memory` |
+| `DOCUMENT_MAX_UPLOAD_BYTES` | `10485760` |
+| `DOCUMENT_MAX_PAGES` | `50` |
+| `DOCUMENT_MAX_PER_REQUEST` | `10` |
+| `VISION_PROVIDER` | `mock` |
+| `VISION_MODEL` | `gemini-3.6-flash` |
+| `EVIDENCE_INCLUDE_DOCUMENTS` | `false` |
+| `PERSISTENCE_PROVIDER` | `in_memory` |
+| `DATABASE_URL` | unset |
+| `DATABASE_ECHO` | `false` |
 
 The application loads a project-root `.env` file when present. Explicit process
 environment variables take precedence. Set `APP_ENV_FILE` to another path to
@@ -417,6 +633,14 @@ and one critic round:
 python -m scripts.test_agentic_investigation
 ```
 
+Run one real document management experiment (upload a generated DOCX, map it
+into the graph, index it into the vector store, and run a document-grounded
+investigation):
+
+```powershell
+python -m scripts.test_document_experiment
+```
+
 Run the optional real Gemini embedding smoke test with one configured model and
 two tiny strings:
 
@@ -447,6 +671,53 @@ opt-in and are never run by the automated test suite.
 | `POST` | `/api/v1/rag/index` | Chunk, embed, and index normalized source content |
 | `POST` | `/api/v1/rag/search` | Retrieve the highest-cosine matching source chunks |
 | `GET` | `/api/v1/rag/stats` | Inspect non-secret in-memory vector-store statistics |
+| `POST` | `/api/v1/documents/upload` | Upload one or more documents (multipart `files`) |
+| `GET` | `/api/v1/documents/store` | Inspect document-store statistics |
+| `GET` | `/api/v1/documents/list` | List stored documents (optional `kind`, `limit`, `offset`) |
+| `GET` | `/api/v1/documents/{document_id}` | Fetch one document's extracted content |
+| `POST` | `/api/v1/documents/delete` | Delete stored documents by ID |
+| `POST` | `/api/v1/documents/{document_id}/graph` | Map a document's pages/sections into the graph store |
+| `POST` | `/api/v1/documents/{document_id}/index` | Index a document's pages into the vector store |
+| `POST` | `/api/v1/documents/investigations` | Run a document-grounded investigation |
+| `POST` | `/api/v1/users` | Create a user (409 on duplicate email) |
+| `GET` | `/api/v1/users/{user_id}` | Fetch one persisted user |
+| `GET` | `/api/v1/investigations` | List persisted investigations (optional `limit`, `offset`) |
+| `GET` | `/api/v1/investigations/{investigation_id}` | Fetch a persisted investigation with steps, sources, evidence, conflicts, and report |
+| `DELETE` | `/api/v1/investigations/{investigation_id}` | Delete a persisted investigation |
+| `GET` | `/api/v1/documents` | List persisted documents (optional `kind`, `limit`, `offset`) |
+| `DELETE` | `/api/v1/documents/{document_id}` | Delete a persisted document from the repository and the store |
+
+### UI endpoints (browser case workspace)
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/dashboard` | Dashboard page (charts + recent cases) |
+| `GET` | `/investigate` | New-case form page |
+| `GET` | `/documents` | Document upload/search page |
+| `GET` | `/history` | Case history page |
+| `GET` | `/rag` | Evidence search page |
+| `GET` | `/graph` | Case relationship-graph page |
+| `GET` | `/investigation/{id}` | Case detail page (status, evidence, report, entities, log) |
+| `GET` | `/investigation/{id}/export?format=csv\|json` | Export one case |
+| `GET` | `/api/dashboard` | Dashboard statistics and chart data |
+| `POST` | `/api/investigations` | Enqueue a new investigation (`title`, `description`, `notes`, `timeline_start`, `timeline_end`) |
+| `GET` | `/api/investigations` | List investigations |
+| `GET` | `/api/investigations/{id}` | Fetch one investigation |
+| `DELETE` | `/api/investigations/{id}` | Delete one investigation |
+| `GET` | `/api/investigations/{id}/status` | Status, progress, and current stage |
+| `POST` | `/api/investigations/{id}/rerun` | Clear results and re-enqueue |
+| `GET` | `/api/investigations/{id}/evidence` | Evidence items |
+| `GET` | `/api/investigations/{id}/events` | Pipeline event log |
+| `GET` | `/api/investigations/{id}/entities` | Extracted entities |
+| `GET` | `/api/investigations/{id}/report` | Final report |
+| `GET` | `/api/investigations/{id}/graph` | Graph nodes and edges |
+| `GET` | `/api/documents?q=` | List/search documents |
+| `POST` | `/api/documents/upload` | Upload documents (multipart `files`, `doc_type`, optional `titles`) |
+| `DELETE` | `/api/documents/{id}` | Delete one document |
+| `POST` | `/api/rag/search` | Retrieve relevant document chunks for a query |
+
+These endpoints are excluded from the OpenAPI schema; the `/api/v1` surface
+above remains the machine-facing API.
 
 ### Planning request
 
@@ -725,6 +996,41 @@ contains supporting, contradicting, neutral, and insufficient counts; the
 strongest supporting and contradicting items; and unresolved conflicts. It
 intentionally contains no final truth verdict.
 
+### Document upload request
+
+Send multipart form data with one or more files under the `files` key to
+`POST /api/v1/documents/upload`:
+
+```text
+files: report.pdf     (application/pdf)
+files: notes.txt      (text/plain)
+```
+
+Accepted extensions are `.pdf`, `.docx`, `.txt`, `.md`, `.png`, `.jpg`, and
+`.jpeg`. The response reports each ingested document, its page and character
+counts, and whether the content was a duplicate. Re-uploading identical bytes
+returns the existing document with `duplicate: true`.
+
+### Document-grounded investigation request
+
+```json
+{
+  "query": "What compliance problems did the bidders face?",
+  "depth": "standard",
+  "document_ids": ["doc-5287eebdb3b04812a2cb85ea4e8a3017"],
+  "use_rag": true,
+  "use_graph": true
+}
+```
+
+Send this body to `POST /api/v1/documents/investigations`. The service plans the
+investigation, recalls the most relevant document pages (`use_rag`) and graph
+neighbors (`use_graph`), and asks the configured report generator for findings
+that quote the excerpts. The response is `no_documents` when no matching
+documents are stored. With `LLM_PROVIDER=mock` the deterministic generator
+extracts excerpt summaries; with `LLM_PROVIDER=gemini` a live model synthesizes
+the report. `fallback_used` distinguishes mock output from a configured model.
+
 ## Tests and verification
 
 Install runtime dependencies only:
@@ -745,10 +1051,26 @@ Run the test suite:
 python -m pytest
 ```
 
+The service tests live under `tests/` and the browser-UI tests under
+`app/tests/` (both force the in-memory provider and mock providers so the
+suite runs fully offline).
+
 Source compilation can be checked with:
 
 ```powershell
 python -m compileall app
+```
+
+Dependency consistency can be checked with `python -m pip check`. The
+persistence suite covers the in-memory provider end to end (users,
+documents, and agentic investigation persistence) and exercises the
+SQLAlchemy repositories against an in-memory SQLite database. To verify the
+relational schema matches the models:
+
+```powershell
+$env:DATABASE_URL="sqlite:///./ai_investigation.db"
+alembic upgrade head
+alembic check
 ```
 
 ## API-key security
@@ -780,10 +1102,29 @@ python -m compileall app
   phase can add a persistent vector database behind the existing interface.
 - No Pinecone, Chroma, Qdrant, FAISS, Neo4j, or GraphRAG integration is included.
 - No autonomous crawling or page-content fetching.
-- No persistence, authentication, or background jobs. The replay log is returned
-  with the response but is not stored by the service.
+- Persistence defaults to the process-local `in_memory` provider, which is
+  cleared on restart and not shared across workers. The opt-in SQLAlchemy
+  provider supports PostgreSQL and SQLite; a real deployment should provision
+  a database, run `alembic upgrade head`, and set `PERSISTENCE_PROVIDER=sqlalchemy`.
+- The SQLAlchemy session layer is synchronous and runs on worker threads;
+  it has not been benchmarked under high concurrency.
+- `reset_persistence()` is a test/development helper and clears the in-memory
+  provider only.
+- No authentication, authorization, or user sessions are included; the users
+  endpoint persists identity records only.
+- `InMemoryDocumentStore` is process-local, is cleared on restart, and is not
+  shared across workers. Uploaded documents now also persist through the
+  repository layer, so the in-memory store can be repopulated from the
+  persistence provider on restart.
+- Vision-based reading (`VISION_PROVIDER=gemini`) sends image bytes to the
+  configured Gemini model and may incur usage charges; it is never used by the
+  automated test suite.
 - Synthesis is bounded and evidence-grounded; it does not perform autonomous
   truth verification or return an absolute truth verdict.
+- The browser UI is a local case workspace. Its worker runs a deterministic
+  offline mock pipeline (no model calls), its SQLite store is single-process,
+  and its upload handling indexes plain text — it does not perform the heavy
+  document extraction or AI evidence classification available under `/api/v1`.
 
 ## Planned roadmap
 
@@ -792,6 +1133,6 @@ python -m compileall app
 3. Add grounded-search evaluation fixtures and provider observability.
 4. Add resilient provider telemetry without logging sensitive content.
 5. Add full-page content acquisition with explicit policy controls.
-6. Add persistence and asynchronous investigation jobs.
+6. Add asynchronous investigation jobs and background execution.
 7. Add citation validation and evidence-grounded report synthesis.
 8. Add an optional persistent vector-store adapter and reindexing lifecycle.

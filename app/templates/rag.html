@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Evidence Search · EvidenceAI{% endblock %}
+{% block content %}
+
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+    <div class="mb-4 text-center">
+      <h1 class="h3 mb-1">Evidence search</h1>
+      <p class="text-body-secondary mb-0">
+        Ask a question and retrieve relevant passages across the document base.
+      </p>
+      <div class="ai-mono small text-body-tertiary mt-2" id="ragStats"></div>
+    </div>
+
+    <div class="card ai-card mb-3">
+      <div class="card-body">
+        <form id="ragForm">
+          <div class="input-group input-group-lg">
+            <span class="input-group-text bg-transparent"><i class="bi bi-search"></i></span>
+            <input
+              type="search"
+              class="form-control"
+              id="ragQuery"
+              placeholder="e.g. What did the vendor invoice for in June?"
+              autofocus
+            />
+            <button class="btn btn-primary" type="submit">Search</button>
+          </div>
+        </form>
+        <div class="small text-body-secondary mt-3" id="ragSample">
+          Try:
+          <a href="#" data-query="List all transactions exceeding the approval threshold">transactions over approval threshold</a> ·
+          <a href="#" data-query="Who signed off on the disputed payment?">sign-offs on disputed payments</a> ·
+          <a href="#" data-query="Find timeline discrepancies in witness statements">timeline discrepancies</a>
+        </div>
+        <div class="ai-mono small text-body-tertiary mt-1" id="ragStatus"></div>
+      </div>
+    </div>
+
+    <div id="searchResults">
+      <div class="text-center text-body-secondary py-5">
+        <i class="bi bi-chat-left-text fs-1 d-block mb-2"></i>
+        Enter a question to search the evidence base.
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/rag.js"></script>
+{% endblock %}

@@ -1,0 +1,17 @@
+{% macro spinner(label='Working…') -%}
+<div class="ai-loading" role="status" aria-live="polite">
+  <div class="ai-spinner" aria-hidden="true">
+    <div class="ai-spinner-ring"></div>
+    <i class="bi bi-search-heart ai-spinner-icon"></i>
+  </div>
+  <p>{{ label }}</p>
+</div>
+{%- endmacro %}
+
+{% macro skeleton(rows=3) -%}
+<div class="ai-skeleton" aria-hidden="true">
+  {% for _ in range(rows) %}
+  <div class="ai-skeleton-line" style="width: {{ 100 - loop.index0 * 12 }}%"></div>
+  {% endfor %}
+</div>
+{%- endmacro %}

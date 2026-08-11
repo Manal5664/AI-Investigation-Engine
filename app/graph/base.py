@@ -65,6 +65,10 @@ class GraphStore(ABC):
         """Delete an investigation node and everything built for it."""
 
     @abstractmethod
+    async def has_document(self, document_id: str) -> bool:
+        """Return True when the store holds nodes derived from a document."""
+
+    @abstractmethod
     async def clear(self) -> int:
         """Delete every stored node and edge; return the removed count."""
 

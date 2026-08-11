@@ -69,6 +69,10 @@ class VectorStore(ABC):
         """Delete all chunks carrying the supplied source ID."""
 
     @abstractmethod
+    async def count_by_source(self, source_id: str) -> int:
+        """Return the number of chunks stored for a single source ID."""
+
+    @abstractmethod
     async def clear(self) -> int:
         """Delete every stored vector and return the removed count."""
 

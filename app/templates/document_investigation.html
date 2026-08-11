@@ -1,0 +1,63 @@
+<div class="modal fade" id="documentInvestigationModal" tabindex="-1" aria-labelledby="documentInvestigationModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="documentInvestigationModalLabel">
+          <i class="bi bi-search-heart" aria-hidden="true"></i> Investigate documents
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="documentInvestigationForm">
+          <div class="mb-3">
+            <label for="docInvQuery" class="form-label">Investigation query</label>
+            <textarea id="docInvQuery" name="query" class="form-control ai-textarea" rows="2"
+                      minlength="5" required
+                      placeholder="e.g. Summarize the procurement irregularities described across these documents."></textarea>
+          </div>
+          <div class="row g-3 mb-3">
+            <div class="col-md-4">
+              <label for="docInvDepth" class="form-label">Depth</label>
+              <select id="docInvDepth" name="depth" class="form-select">
+                <option value="quick">Quick</option>
+                <option value="standard" selected>Standard</option>
+                <option value="deep">Deep</option>
+              </select>
+            </div>
+            <div class="col-md-4">
+              <div class="form-check form-switch mt-4">
+                <input class="form-check-input" type="checkbox" role="switch" id="docInvRag" name="use_rag" checked>
+                <label class="form-check-label" for="docInvRag">Use RAG</label>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="form-check form-switch mt-4">
+                <input class="form-check-input" type="checkbox" role="switch" id="docInvGraph" name="use_graph" checked>
+                <label class="form-check-label" for="docInvGraph">Use graph</label>
+              </div>
+            </div>
+          </div>
+          <div class="mb-3">
+            <p class="form-label mb-1">Include documents</p>
+            <div class="ai-checkbox-grid" id="docInvDocuments">
+              {% for doc in documents %}
+              <label class="ai-checkbox-chip">
+                <input type="checkbox" name="document_ids" value="{{ doc.document_id }}" checked>
+                <span><i class="bi bi-file-earmark-text" aria-hidden="true"></i> {{ doc.filename }}</span>
+              </label>
+              {% else %}
+              <p class="ai-muted">No documents available. Upload documents first.</p>
+              {% endfor %}
+            </div>
+          </div>
+          <button type="submit" class="btn btn-ai-primary" id="docInvSubmit">
+            <i class="bi bi-search-heart" aria-hidden="true"></i> Run document investigation
+          </button>
+          <span class="ai-hint" id="docInvError" role="alert"></span>
+        </form>
+
+        <div id="docInvResults" class="mt-4"></div>
+      </div>
+    </div>
+  </div>
+</div>

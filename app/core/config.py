@@ -116,6 +116,33 @@ class Settings:
         "GRAPH_EXTRACTION_MODEL",
         "mock-graph-extractor",
     )
+    VISION_PROVIDER: str = os.getenv("VISION_PROVIDER", "mock")
+    VISION_MODEL: str = os.getenv("VISION_MODEL", "gemini-3.6-flash")
+    DOCUMENT_MAX_UPLOAD_BYTES: int = _read_positive_int(
+        "DOCUMENT_MAX_UPLOAD_BYTES",
+        10 * 1024 * 1024,
+    )
+    DOCUMENT_MAX_PAGES: int = _read_positive_int(
+        "DOCUMENT_MAX_PAGES",
+        50,
+    )
+    DOCUMENT_MAX_PER_REQUEST: int = _read_positive_int(
+        "DOCUMENT_MAX_PER_REQUEST",
+        10,
+    )
+    DOCUMENT_STORE_PROVIDER: str = os.getenv(
+        "DOCUMENT_STORE_PROVIDER",
+        "in_memory",
+    )
+    EVIDENCE_INCLUDE_DOCUMENTS: bool = _read_bool(
+        "EVIDENCE_INCLUDE_DOCUMENTS",
+    )
+    PERSISTENCE_PROVIDER: str = os.getenv(
+        "PERSISTENCE_PROVIDER",
+        "in_memory",
+    )
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "").strip()
+    DATABASE_ECHO: bool = _read_bool("DATABASE_ECHO")
 
     def __post_init__(self) -> None:
         if self.RAG_CHUNK_OVERLAP >= self.RAG_CHUNK_SIZE:

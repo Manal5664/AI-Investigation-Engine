@@ -1,0 +1,365 @@
+{% extends "base.html" %}
+{% block title %}{{ investigation.investigation.query }} · EvidenceAI{% endblock %}
+{% block body_case_id %}{{ investigation.investigation.id }}{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-start justify-content-between flex-wrap gap-3 mb-4">
+  <div>
+    <h1 class="h3 mb-1">{{ investigation.investigation.query }}</h1>
+    <p class="text-body-secondary mb-0">
+      Created <span class="ai-mono">{{ investigation.investigation.created_at }}</span>
+      <span class="mx-1 text-body-tertiary">·</span>
+      ID <span class="ai-mono">#{{ investigation.investigation.id }}</span>
+    </p>
+  </div>
+  <div class="d-flex align-items-center gap-2">
+    <div class="dropdown">
+      <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+        <i class="bi bi-download me-1"></i> Export
+      </button>
+      <ul class="dropdown-menu">
+        <li>
+          <a class="dropdown-item" href="/investigation/{{ investigation.investigation.id }}/export?format=csv">
+            <i class="bi bi-filetype-csv me-2"></i>CSV
+          </a>
+        </li>
+        <li>
+          <a class="dropdown-item" href="/investigation/{{ investigation.investigation.id }}/export?format=json">
+            <i class="bi bi-filetype-json me-2"></i>JSON
+          </a>
+        </li>
+      </ul>
+    </div>
+    <button class="btn btn-outline-danger" id="deleteInvestigationBtn" data-id="{{ investigation.investigation.id }}">
+      <i class="bi bi-trash3 me-1"></i> Delete
+    </button>
+  </div>
+</div>
+
+<div class="ai-result-header card ai-card mb-4">
+  <div class="ai-result-meta">
+    <span class="ai-meta-chip"><i class="bi bi-tag"></i> {{ investigation.investigation.depth.value }}</span>
+    {% if investigation.investigation.category %}
+    <span class="ai-meta-chip"><i class="bi bi-folder"></i> {{ investigation.investigation.category.value }}</span>
+    {% endif %}
+    <span class="ai-meta-chip"><i class="bi bi-hdd"></i> {{ investigation.investigation.provider_used or "—" }}</span>
+    {% if investigation.investigation.model_used %}
+    <span class="ai-meta-chip"><i class="bi bi-cpu"></i> {{ investigation.investigation.model_used }}</span>
+    {% endif %}
+    <span class="ai-meta-chip"><i class="bi bi-globe2"></i> {{ investigation.investigation.total_source_count }} sources</span>
+    <span class="ai-meta-chip"><i class="bi bi-lightbulb"></i> {{ investigation.investigation.total_evidence_count }} evidence</span>
+    {% if investigation.investigation.completed_at %}
+    <span class="ai-meta-chip"><i class="bi bi-check2-circle"></i> Completed {{ investigation.investigation.completed_at }}</span>
+    {% endif %}
+  </div>
+  <div class="ai-result-badges">
+    {% if investigation.investigation.status.value == 'completed' %}
+    <span class="badge rounded-pill text-bg-success">Completed</span>
+    {% elif investigation.investigation.status.value == 'failed' %}
+    <span class="badge rounded-pill text-bg-danger">Failed</span>
+    {% else %}
+    <span class="badge rounded-pill text-bg-warning">Partial</span>
+    {% endif %}
+    {% if investigation.investigation.confidence %}
+    <span class="badge rounded-pill text-bg-primary">Confidence: {{ investigation.investigation.confidence.value }}</span>
+    {% endif %}
+  </div>
+</div>
+
+{% if investigation.investigation.errors %}
+<div class="alert alert-warning mb-4">
+  <div class="fw-semibold mb-1">Issues during the run</div>
+  <ul class="mb-0">
+    {% for error in investigation.investigation.errors %}
+    <li class="small">{{ error.get("provider", "") }}: {{ error.get("message", "") }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="card ai-card">
+  <div class="ai-card-head">
+    <ul class="nav nav-tabs ai-tabs mb-0" role="tablist">
+      <li class="nav-item">
+        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabReport" type="button">
+          <i class="bi bi-file-earmark-text me-1"></i> Report
+        </button>
+      </li>
+      <li class="nav-item">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabSteps" type="button">
+          <i class="bi bi-list-ul me-1"></i> Steps
+          <span class="ai-tab-count">{{ investigation.steps|length }}</span>
+        </button>
+      </li>
+      <li class="nav-item">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabSources" type="button">
+          <i class="bi bi-globe2 me-1"></i> Sources
+          <span class="ai-tab-count">{{ investigation.sources|length }}</span>
+        </button>
+      </li>
+      <li class="nav-item">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabEvidence" type="button">
+          <i class="bi bi-lightbulb me-1"></i> Evidence
+          <span class="ai-tab-count">{{ investigation.evidence_items|length }}</span>
+        </button>
+      </li>
+      <li class="nav-item">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabConflicts" type="button">
+          <i class="bi bi-exclamation-triangle me-1"></i> Conflicts
+          <span class="ai-tab-count">{{ investigation.conflicts|length }}</span>
+        </button>
+      </li>
+    </ul>
+  </div>
+  <div class="ai-tab-content">
+    <div class="tab-content">
+      <div class="tab-pane fade show active" id="tabReport">
+        {% if investigation.report %}
+          <p class="ai-overview-text">{{ investigation.report.overall_evidence_picture }}</p>
+          <div class="ai-summary-strip my-4">
+            <span><i class="bi bi-shield-check me-1"></i> Confidence: {{ investigation.report.confidence.value }}</span>
+            <span><i class="bi bi-file-text me-1"></i> {{ investigation.report.evidence_gaps|length }} evidence gaps</span>
+            <span><i class="bi bi-exclamation-triangle me-1"></i> {{ investigation.report.unresolved_conflicts|length }} unresolved conflicts</span>
+          </div>
+          <p class="ai-card-sub"><i class="bi bi-info-circle me-1"></i> Rationale: {{ investigation.report.confidence_rationale }}</p>
+          {% if investigation.report.strongest_supporting_evidence %}
+          <div class="ai-strong-card support ai-card mb-3 p-3">
+            <div class="fw-semibold mb-1"><i class="bi bi-arrow-up-circle text-success me-1"></i> Strongest supporting evidence</div>
+            <p class="small text-body-secondary mb-0">{{ investigation.report.strongest_supporting_evidence.get("summary", "") }}</p>
+          </div>
+          {% endif %}
+          {% if investigation.report.strongest_contradicting_evidence %}
+          <div class="ai-strong-card contradict ai-card mb-3 p-3">
+            <div class="fw-semibold mb-1"><i class="bi bi-arrow-down-circle text-danger me-1"></i> Strongest contradicting evidence</div>
+            <p class="small text-body-secondary mb-0">{{ investigation.report.strongest_contradicting_evidence.get("summary", "") }}</p>
+          </div>
+          {% endif %}
+          {% if investigation.report.important_limitations %}
+          <h6 class="ai-card-sub mt-4">Limitations</h6>
+          <ul class="ai-bullets">
+            {% for limitation in investigation.report.important_limitations %}
+            <li class="small">{{ limitation }}</li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+          {% if investigation.report.alternative_explanations %}
+          <h6 class="ai-card-sub mt-4">Alternative explanations</h6>
+          <ul class="ai-bullets">
+            {% for alternative in investigation.report.alternative_explanations %}
+            <li class="small">{{ alternative }}</li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+          {% if investigation.report.evidence_gaps %}
+          <h6 class="ai-card-sub mt-4">Evidence gaps</h6>
+          <ul class="ai-bullets">
+            {% for gap in investigation.report.evidence_gaps %}
+            <li class="small">{{ gap }}</li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+        {% else %}
+          <div class="ai-empty">
+            <i class="bi bi-file-earmark-text"></i>
+            <p>No report was produced for this investigation.</p>
+          </div>
+        {% endif %}
+      </div>
+
+      <div class="tab-pane fade" id="tabSteps">
+        {% if investigation.steps %}
+        <div class="ai-timeline">
+          {% for step in investigation.steps %}
+          <div class="ai-timeline-item">
+            <div class="ai-timeline-marker
+              {% if step.status.value == 'completed' %}ai-marker-completed{% elif step.status.value == 'failed' %}ai-marker-failed{% elif step.status.value == 'partial' %}ai-marker-partial{% else %}ai-marker-skipped{% endif %}">
+              <i class="bi bi-check-lg"></i>
+            </div>
+            <div class="ai-timeline-body">
+              <div class="ai-timeline-head">
+                <h3>{{ step.step_name }}</h3>
+                {% if step.status.value == 'completed' %}
+                <span class="badge rounded-pill text-bg-success">{{ step.status.value }}</span>
+                {% elif step.status.value == 'failed' %}
+                <span class="badge rounded-pill text-bg-danger">{{ step.status.value }}</span>
+                {% elif step.status.value == 'partial' %}
+                <span class="badge rounded-pill text-bg-warning">{{ step.status.value }}</span>
+                {% else %}
+                <span class="badge rounded-pill text-bg-secondary">{{ step.status.value }}</span>
+                {% endif %}
+              </div>
+              <p class="ai-timeline-action">{{ step.action_summary }}</p>
+              <div class="ai-timeline-meta">
+                <span><i class="bi bi-globe2 me-1"></i> {{ step.source_count }} sources</span>
+                <span><i class="bi bi-lightbulb me-1"></i> {{ step.evidence_count }} evidence</span>
+                {% if step.provider_used %}
+                <span><i class="bi bi-hdd me-1"></i> {{ step.provider_used }}</span>
+                {% endif %}
+                {% if step.model_used %}
+                <span><i class="bi bi-cpu me-1"></i> {{ step.model_used }}</span>
+                {% endif %}
+                <span><i class="bi bi-clock me-1"></i> {{ step.started_at }}</span>
+              </div>
+              {% for error in step.errors %}
+              <div class="ai-warning-line danger small">{{ error.get("message", "") }}</div>
+              {% endfor %}
+              {% for warning in step.warnings %}
+              <div class="ai-warning-line small">{{ warning }}</div>
+              {% endfor %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="ai-empty"><i class="bi bi-list-ul"></i><p>No execution steps were recorded.</p></div>
+        {% endif %}
+      </div>
+
+      <div class="tab-pane fade" id="tabSources">
+        {% if investigation.sources %}
+          {% for source in investigation.sources %}
+          <div class="card ai-card ai-evidence-card mb-3">
+            <div class="ai-source-head">
+              <div>
+                <h5 class="ai-source-title">{{ source.title }}</h5>
+                <p class="ai-source-sub">{{ source.domain }} · {{ source.source_type.value }}</p>
+              </div>
+              <span class="ai-mono text-uppercase small text-body-secondary">{{ source.source_id }}</span>
+            </div>
+            {% if source.snippet %}
+            <p class="ai-source-snippet">{{ source.snippet }}</p>
+            {% endif %}
+            <div class="ai-source-meta">
+              <a class="ai-source-link" href="{{ source.url }}" target="_blank" rel="noopener noreferrer">
+                {{ source.url }}
+              </a>
+              <span class="ai-source-retrieved">Retrieved {{ source.retrieved_at }}</span>
+            </div>
+            {% if source.credibility %}
+            <div class="ai-source-credibility">
+              <i class="bi bi-shield-check me-1"></i>
+              Credibility: {{ source.credibility.level.value }}
+              {% if source.credibility.score is not none %}
+              ({{ source.credibility.score }}/100)
+              {% endif %}
+            </div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        {% else %}
+        <div class="ai-empty"><i class="bi bi-globe2"></i><p>No sources were gathered.</p></div>
+        {% endif %}
+      </div>
+
+      <div class="tab-pane fade" id="tabEvidence">
+        {% if investigation.evidence_items %}
+          {% for item in investigation.evidence_items %}
+          <div class="card ai-card ai-evidence-card mb-3">
+            <div class="ai-evidence-head">
+              <div class="ai-evidence-summary">{{ item.summary }}</div>
+              <div class="ai-evidence-badges">
+                {% if item.stance.value == 'supports' %}
+                <span class="badge rounded-pill text-bg-success">supports</span>
+                {% elif item.stance.value == 'contradicts' %}
+                <span class="badge rounded-pill text-bg-danger">contradicts</span>
+                {% elif item.stance.value == 'insufficient' %}
+                <span class="badge rounded-pill text-bg-warning">insufficient</span>
+                {% else %}
+                <span class="badge rounded-pill text-bg-secondary">neutral</span>
+                {% endif %}
+                <span class="badge rounded-pill text-bg-light border">{{ item.strength.value }}</span>
+              </div>
+            </div>
+            <p class="ai-evidence-rationale"><i class="bi bi-lightbulb me-1"></i> {{ item.rationale }}</p>
+            {% if item.relevant_passage %}
+            <details class="ai-evidence-passage">
+              <summary>Relevant passage</summary>
+              <blockquote>{{ item.relevant_passage }}</blockquote>
+            </details>
+            {% endif %}
+            <div class="ai-evidence-source">
+              <i class="bi bi-globe2"></i>
+              {% if item.source_url %}
+              <a class="ai-source-link" href="{{ item.source_url }}" target="_blank" rel="noopener noreferrer">{{ item.source_url }}</a>
+              {% else %}
+              <span class="ai-mono small">{{ item.source_id }}</span>
+              {% endif %}
+              <span class="ai-mono small text-body-tertiary">{{ item.evidence_id }}</span>
+            </div>
+            <div class="ai-evidence-meta">
+              <span><i class="bi bi-hdd me-1"></i> {{ item.extraction_method }}</span>
+              <span><i class="bi bi-cpu me-1"></i> {{ item.model_used }}</span>
+              {% if item.page %}
+              <span><i class="bi bi-file-text me-1"></i> page {{ item.page }}</span>
+              {% endif %}
+              <span><i class="bi bi-clock me-1"></i> {{ item.retrieval_timestamp }}</span>
+            </div>
+          </div>
+          {% endfor %}
+        {% else %}
+        <div class="ai-empty"><i class="bi bi-lightbulb"></i><p>No evidence items were extracted.</p></div>
+        {% endif %}
+      </div>
+
+      <div class="tab-pane fade" id="tabConflicts">
+        {% if investigation.conflicts %}
+          {% for conflict in investigation.conflicts %}
+          <div class="card ai-card ai-conflict-card mb-3">
+            <div class="ai-conflict-head">
+              <h3><i class="bi bi-exclamation-triangle me-1"></i> {{ conflict.sub_question_id }}</h3>
+              {% if conflict.has_supporting_and_contradicting_evidence %}
+              <span class="badge rounded-pill text-bg-warning">Contested</span>
+              {% else %}
+              <span class="badge rounded-pill text-bg-secondary">No conflict</span>
+              {% endif %}
+            </div>
+            {% for claim in conflict.conflicting_source_claims %}
+            <div class="ai-conflict-claim">
+              <div class="ai-claim-source">
+                <a href="#" class="ai-source-link"><i class="bi bi-arrow-up-circle text-success me-1"></i> {{ claim.supporting_source_id }}</a>
+                <span class="text-body-tertiary">vs</span>
+                <a href="#" class="ai-source-link"><i class="bi bi-arrow-down-circle text-danger me-1"></i> {{ claim.contradicting_source_id }}</a>
+              </div>
+              <p class="ai-claim-text">{{ claim.description }}</p>
+            </div>
+            {% endfor %}
+            {% for unresolved in conflict.unresolved_conflicts %}
+            <div class="ai-warning-line">{{ unresolved }}</div>
+            {% endfor %}
+          </div>
+          {% endfor %}
+        {% else %}
+        <div class="ai-empty"><i class="bi bi-exclamation-triangle"></i><p>No evidence conflicts recorded.</p></div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  "use strict";
+  var btn = document.getElementById("deleteInvestigationBtn");
+  if (!btn) return;
+  btn.addEventListener("click", function () {
+    var id = btn.getAttribute("data-id");
+    aiConfirm(
+      "Delete this investigation and its results? This cannot be undone.",
+      function () {
+        api.del("/api/v1/investigations/" + id)
+          .then(function () {
+            aiToast("Investigation deleted.", "success");
+            window.location.href = "/history";
+          })
+          .catch(function (err) {
+            aiToast(err.message, "danger");
+          });
+      }
+    );
+  });
+})();
+</script>
+{% endblock %}

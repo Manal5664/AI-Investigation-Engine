@@ -154,6 +154,17 @@ class InMemoryVectorStore(VectorStore):
                 self._vector_dimension = None
             return len(chunk_ids)
 
+    async def count_by_source(self, source_id: str) -> int:
+        normalized_id = source_id.strip()
+        if not normalized_id:
+            raise ValueError("source_id must not be empty")
+        async with self._lock:
+            return sum(
+                1
+                for record in self._records.values()
+                if record.chunk.source_id == normalized_id
+            )
+
     async def clear(self) -> int:
         async with self._lock:
             removed = len(self._records)

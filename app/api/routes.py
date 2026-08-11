@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.api.ui_routes import router as ui_router
 from app.api.v1.routes import router as v1_router
 from app.core.config import settings
 from app.schemas.common import HealthResponse, RootResponse
@@ -23,3 +24,4 @@ def health_check() -> HealthResponse:
 
 
 router.include_router(v1_router)
+router.include_router(ui_router)
