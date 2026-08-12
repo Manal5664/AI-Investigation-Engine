@@ -63,7 +63,8 @@ a { color: var(--ai-primary); }
    App shell
    -------------------------------------------------------------------------- */
 
-.ai-app {
+.ai-app,
+.ai-layout {
   display: flex;
   min-height: 100vh;
 }
@@ -189,7 +190,8 @@ a { color: var(--ai-primary); }
     box-shadow: var(--ai-shadow-lg);
   }
   .ai-sidebar.open { transform: translateX(0); }
-  .ai-app { display: block; }
+  .ai-app,
+  .ai-layout { display: block; }
 }
 
 /* --------------------------------------------------------------------------

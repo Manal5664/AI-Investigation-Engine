@@ -10,6 +10,7 @@ Run with:
 
 import asyncio
 import itertools
+import re
 from datetime import datetime, timezone
 from unittest.mock import patch
 
@@ -218,6 +219,63 @@ def test_page_routes(client):
         res = client.get(path)
         assert res.status_code == 200, path
         assert b"EvidenceAI" in res.content
+
+
+def test_pages_render_real_content(client):
+    """Regression: every UI page must render page-specific HTML inside <main>,
+    not a blank content area. HTTP 200 alone is not enough."""
+    expected = {
+        "/dashboard": (
+            b"Dashboard",
+            b"Investigations &amp; documents",
+            b"Recent investigations",
+            b'id="statTotal"',
+        ),
+        "/investigate": (
+            b"New investigation",
+            b"Investigation question",
+            b"Run investigation",
+            b'id="runCritic"',
+            b'id="useRag"',
+            b'id="useGraphRag"',
+            b'id="depth"',
+        ),
+        "/documents": (
+            b"Documents",
+            b"Upload evidence",
+            b"Stored documents",
+            b"Upload evidence",
+            b"Upload",
+        ),
+        "/history": (
+            b"History",
+            b"Past investigations and their outcomes.",
+            b'id="historyBody"',
+        ),
+        "/rag": (
+            b"Evidence search",
+            b">Search<",
+            b"Enter a question to search the evidence base.",
+        ),
+        "/graph": (
+            b"Graph view",
+            b"Inspector",
+            b'id="graphCanvas"',
+        ),
+    }
+    for path, markers in expected.items():
+        res = client.get(path)
+        assert res.status_code == 200, path
+        # Page-specific content must be present (i.e. the content block
+        # actually rendered inside <main> rather than an empty area).
+        main = re.search(rb"<main.*?</main>", res.content, re.DOTALL)
+        assert main is not None, path
+        for marker in markers:
+            assert marker in main.group(0), f"{path} missing {marker!r}"
+        # Blank-page guard: strip tags from <main> and require real text.
+        text = re.sub(rb"<[^>]+>", b" ", main.group(0))
+        text = re.sub(rb"\s+", b" ", text).strip()
+        assert len(text) > 40, f"{path} main content area is effectively empty"
 
 
 def test_unknown_route_404(client):

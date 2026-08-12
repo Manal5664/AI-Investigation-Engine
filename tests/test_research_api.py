@@ -1,10 +1,7 @@
 import asyncio
 from typing import Any
-
 import httpx
-
 from app.main import app
-
 
 def _post(path: str, body: dict[str, Any]) -> httpx.Response:
     async def make_request() -> httpx.Response:
