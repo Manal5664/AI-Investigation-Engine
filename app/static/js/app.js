@@ -105,29 +105,57 @@
   }
 
   function initThemeToggle() {
-    var button = document.getElementById("themeToggle");
-    if (!button) return;
+    var buttons = document.querySelectorAll("[data-theme-toggle]");
+    if (!buttons.length) return;
     var root = document.documentElement;
     function apply(theme) {
       root.setAttribute("data-bs-theme", theme);
       try { window.localStorage.setItem("aie-theme", theme); } catch (_e) { /* noop */ }
+      var dark = theme === "dark";
+      Array.prototype.forEach.call(buttons, function (btn) {
+        var icon = btn.querySelector("i");
+        if (icon) icon.className = "bi bi-" + (dark ? "sun" : "moon-stars");
+      });
     }
     try {
       var saved = window.localStorage.getItem("aie-theme");
       if (saved === "dark" || saved === "light") apply(saved);
     } catch (_e) { /* noop */ }
-    button.addEventListener("click", function () {
-      apply(root.getAttribute("data-bs-theme") === "dark" ? "light" : "dark");
+    Array.prototype.forEach.call(buttons, function (btn) {
+      btn.addEventListener("click", function () {
+        apply(root.getAttribute("data-bs-theme") === "dark" ? "light" : "dark");
+      });
     });
+  }
+
+  function setSidebar(open) {
+    var sidebar = document.getElementById("aiSidebar");
+    var layout = document.getElementById("aiLayout");
+    var backdrop = document.getElementById("sidebarBackdrop");
+    if (sidebar) sidebar.classList.toggle("open", open);
+    if (layout) layout.classList.toggle("sidebar-open", open);
+    if (backdrop) backdrop.classList.toggle("show", open);
   }
 
   function initSidebarToggle() {
     var button = document.getElementById("sidebarToggle");
     var sidebar = document.getElementById("aiSidebar");
+    var backdrop = document.getElementById("sidebarBackdrop");
     if (!button || !sidebar) return;
     button.addEventListener("click", function () {
-      sidebar.classList.toggle("open");
+      setSidebar(!sidebar.classList.contains("open"));
     });
+    if (backdrop) {
+      backdrop.addEventListener("click", function () { setSidebar(false); });
+    }
+    Array.prototype.forEach.call(
+      sidebar.querySelectorAll(".ai-nav-item"),
+      function (item) {
+        item.addEventListener("click", function () {
+          if (window.matchMedia("(max-width: 991.98px)").matches) setSidebar(false);
+        });
+      }
+    );
   }
 
   document.addEventListener("DOMContentLoaded", function () {

@@ -367,6 +367,133 @@ def test_investigation_page_missing(client):
     assert b"Investigation not found" in res.content
 
 
+# --------------------------------------------------------------------------
+# UI polish regression tests
+# --------------------------------------------------------------------------
+
+
+def test_investigate_page_depth_cards_and_hidden_select(client):
+    """Depth picker cards replace the visible select, but the hidden
+    <select id="depth"> must survive for backward compatibility."""
+    res = client.get("/investigate")
+    assert res.status_code == 200
+    main = re.search(rb"<main.*?</main>", res.content, re.DOTALL)
+    assert main is not None
+    html = main.group(0)
+    assert b'id="depth"' in html
+    assert html.count(b"ai-depth-card") >= 3
+    for depth in (b'data-depth="quick"', b'data-depth="standard"', b'data-depth="deep"'):
+        assert depth in html
+
+
+def test_investigate_page_workflow_indicator(client):
+    res = client.get("/investigate")
+    assert res.status_code == 200
+    main = re.search(rb"<main.*?</main>", res.content, re.DOTALL)
+    assert main is not None
+    html = main.group(0)
+    assert b'id="investigateWorkflow"' in html
+    for step in (b"Planning sub-questions", b"Researching sources", b"Synthesizing the report"):
+        assert step in html
+
+
+def test_documents_page_dropzone(client):
+    res = client.get("/documents")
+    assert res.status_code == 200
+    main = re.search(rb"<main.*?</main>", res.content, re.DOTALL)
+    assert main is not None
+    html = main.group(0)
+    assert b'id="docDropzone"' in html
+    assert b'id="documentFile"' in html
+    assert b"Drag" in html and b"drop" in html
+
+
+def test_history_page_filters(client):
+    res = client.get("/history")
+    assert res.status_code == 200
+    main = re.search(rb"<main.*?</main>", res.content, re.DOTALL)
+    assert main is not None
+    html = main.group(0)
+    assert b'id="historyFilter"' in html
+    assert b'id="historyStatus"' in html
+
+
+def test_rag_page_top_k_slider(client):
+    res = client.get("/rag")
+    assert res.status_code == 200
+    main = re.search(rb"<main.*?</main>", res.content, re.DOTALL)
+    assert main is not None
+    html = main.group(0)
+    assert b'id="topK"' in html
+    assert b'id="topKValue"' in html
+
+
+def test_investigation_page_graph_tab(client):
+    investigation = seed_investigation()
+    res = client.get(f"/investigation/{investigation.id}")
+    assert res.status_code == 200
+    html = res.content
+    assert b'data-bs-target="#tabGraph"' in html
+    assert b'id="resultGraphCanvas"' in html
+
+
+def seed_failed_investigation() -> InvestigationRecord:
+    """Persist a failed investigation with provider errors and no results."""
+    provider = get_persistence_provider()
+    now = datetime.now(timezone.utc)
+    investigation = InvestigationRecord(
+        id="inv-%012x" % next(_ID_COUNTER),
+        query="Failed provider smoke case",
+        depth="quick",
+        category="general_investigation",
+        status="failed",
+        provider_used="gemini_grounded",
+        model_used="gemini-3.6-flash",
+        created_at=now,
+        completed_at=now,
+        synthesis="",
+        confidence=None,
+        warnings=[],
+        errors=[
+            {
+                "error_type": "provider_error",
+                "provider": "gemini_grounded",
+                "model": "gemini-3.6-flash",
+                "message": "Rate limit exceeded while grounding the search.",
+                "retryable": True,
+                "retry_after_seconds": 60,
+            }
+        ],
+        total_source_count=0,
+        total_evidence_count=0,
+        plan={"depth": "quick"},
+    )
+    uow = provider.unit_of_work()
+    try:
+        uow.repositories.investigations.create(investigation)
+    finally:
+        uow.commit()
+        uow.close()
+    return investigation
+
+
+def test_investigation_page_failed_shows_provider_error_summary(client):
+    investigation = seed_failed_investigation()
+    res = client.get(f"/investigation/{investigation.id}")
+    assert res.status_code == 200
+    html = res.content
+    assert b"Investigation failed before gathering evidence" in html
+    assert b"Rate limit exceeded while grounding the search." in html
+    assert b"gemini_grounded" in html
+
+
+def test_investigation_page_completed_hides_provider_error_summary(client):
+    investigation = seed_investigation()
+    res = client.get(f"/investigation/{investigation.id}")
+    assert res.status_code == 200
+    assert b"Investigation failed before gathering evidence" not in res.content
+
+
 def test_delete_investigation_via_api(client):
     investigation = seed_investigation()
     res = client.delete(f"/api/v1/investigations/{investigation.id}")

@@ -14,6 +14,25 @@
 
 <div id="historyError" class="alert alert-danger d-none"></div>
 
+<div class="ai-history-toolbar mb-3">
+  <div class="input-group ai-search-form">
+    <span class="input-group-text ai-search-icon"><i class="bi bi-search"></i></span>
+    <input
+      type="search"
+      class="form-control"
+      id="historyFilter"
+      placeholder="Filter by query…"
+      aria-label="Filter investigations by query"
+    />
+  </div>
+  <select class="form-select form-select-sm ai-filter-select" id="historyStatus" aria-label="Filter by status">
+    <option value="">All statuses</option>
+    <option value="completed">Completed</option>
+    <option value="partial">Partial</option>
+    <option value="failed">Failed</option>
+  </select>
+</div>
+
 <div class="card ai-card">
   <div class="table-responsive ai-table">
     <table class="table table-hover align-middle mb-0">

@@ -21,12 +21,22 @@
       <div class="card-body">
         <form id="uploadForm">
           <div class="mb-3">
-            <label for="documentFile" class="form-label fw-semibold">Files</label>
-            <input type="file" class="form-control" id="documentFile" name="files" multiple required />
-            <div class="ai-hint mt-1">PDF, DOCX, TXT, and image files are supported.</div>
+            <label class="ai-dropzone" id="docDropzone" for="documentFile" role="button" tabindex="0" aria-label="Choose files to upload">
+              <i class="bi bi-cloud-arrow-up ai-dropzone-icon" aria-hidden="true"></i>
+              <p id="dropzoneLabel">Drag &amp; drop files here, or click to browse</p>
+              <small class="ai-hint">PDF, DOCX, TXT, and image files are supported.</small>
+            </label>
+            <input type="file" class="visually-hidden" id="documentFile" name="files" multiple required />
+            <div class="ai-upload-list d-none" id="fileList"></div>
+            <div id="uploadProgress" class="ai-upload-progress d-none">
+              <div class="progress mb-1">
+                <div class="progress-bar" id="uploadProgressBar" role="progressbar" style="width: 0%" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+              </div>
+              <div class="small text-body-secondary" id="uploadProgressText">Uploading…</div>
+            </div>
           </div>
           <button type="submit" class="btn btn-ai-primary w-100" id="uploadBtn">
-            <span class="spinner-border spinner-border-sm d-none" role="status"></span>
+            <span class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
             Upload
           </button>
           <div id="uploadResult" class="small mt-2 d-none"></div>

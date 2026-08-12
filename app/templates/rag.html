@@ -26,12 +26,17 @@
             />
             <button class="btn btn-primary" type="submit">Search</button>
           </div>
+          <div class="ai-topk mt-3">
+            <label for="topK" class="form-label mb-0 text-body-secondary small">Results</label>
+            <input type="range" class="form-range" id="topK" min="3" max="20" step="1" value="10" aria-label="Number of results to return" />
+            <span class="ai-topk-value" id="topKValue">10</span>
+          </div>
         </form>
         <div class="small text-body-secondary mt-3" id="ragSample">
           Try:
-          <a href="#" data-query="List all transactions exceeding the approval threshold">transactions over approval threshold</a> ·
-          <a href="#" data-query="Who signed off on the disputed payment?">sign-offs on disputed payments</a> ·
-          <a href="#" data-query="Find timeline discrepancies in witness statements">timeline discrepancies</a>
+          <a class="ai-chip" href="#" data-query="List all transactions exceeding the approval threshold">transactions over approval threshold</a>
+          <a class="ai-chip" href="#" data-query="Who signed off on the disputed payment?">sign-offs on disputed payments</a>
+          <a class="ai-chip" href="#" data-query="Find timeline discrepancies in witness statements">timeline discrepancies</a>
         </div>
         <div class="ai-mono small text-body-tertiary mt-1" id="ragStatus"></div>
       </div>

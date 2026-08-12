@@ -12,6 +12,7 @@
     var progress = document.getElementById("investigateProgress");
     var progressBar = document.getElementById("investigateProgressBar");
     var progressText = document.getElementById("investigateProgressText");
+    var workflow = document.getElementById("investigateWorkflow");
     var startedAt = null;
 
     var MESSAGES = [
@@ -22,18 +23,63 @@
       "Synthesizing the report…",
     ];
 
+    var STEPS = ["plan", "research", "extract", "critic", "synthesize"];
+
+    /* Depth picker cards back the hidden <select id="depth">. */
+    var depthSelect = document.getElementById("depth");
+    var depthCards = Array.prototype.slice.call(document.querySelectorAll(".ai-depth-card"));
+    function syncDepthSelect() {
+      if (!depthSelect) return;
+      var selected = depthCards.filter(function (card) {
+        return card.classList.contains("selected");
+      })[0];
+      if (selected && selected.getAttribute("data-depth") !== depthSelect.value) {
+        depthSelect.value = selected.getAttribute("data-depth");
+      }
+    }
+    depthCards.forEach(function (card) {
+      card.addEventListener("click", function () {
+        depthCards.forEach(function (c) {
+          c.classList.toggle("selected", c === card);
+          c.setAttribute("aria-checked", c === card ? "true" : "false");
+        });
+        syncDepthSelect();
+      });
+    });
+    if (depthSelect && depthCards.length) {
+      depthSelect.addEventListener("change", function () {
+        depthCards.forEach(function (card) {
+          var isSelected = card.getAttribute("data-depth") === depthSelect.value;
+          card.classList.toggle("selected", isSelected);
+          card.setAttribute("aria-checked", isSelected ? "true" : "false");
+        });
+      });
+    }
+    syncDepthSelect();
+
+    function setWorkflow(phaseIndex) {
+      if (!workflow) return;
+      var steps = workflow.querySelectorAll("[data-wf-step]");
+      Array.prototype.forEach.call(steps, function (el) {
+        var idx = STEPS.indexOf(el.getAttribute("data-wf-step"));
+        el.classList.toggle("done", idx < phaseIndex);
+        el.classList.toggle("active", idx === phaseIndex);
+      });
+    }
+
     function setProgress(message) {
       var elapsed = startedAt ? Math.round((Date.now() - startedAt) / 1000) : 0;
       var minutes = Math.floor(elapsed / 60);
       var seconds = elapsed % 60;
-      var timer =
-        (minutes > 0 ? minutes + "m " : "") + seconds + "s";
+      var timer = (minutes > 0 ? minutes + "m " : "") + seconds + "s";
       if (progressBar) {
         var phase = Math.min(90, Math.floor(elapsed / 30) * 20);
         progressBar.style.width = phase + "%";
+        progressBar.setAttribute("aria-valuenow", phase);
       }
       if (progressText) progressText.textContent = message + " (" + timer + ")";
       if (progress) progress.classList.remove("d-none");
+      if (workflow) workflow.classList.remove("d-none");
     }
 
     function setBusy(busy) {
@@ -52,7 +98,7 @@
         return;
       }
 
-      var depth = (document.getElementById("depth") || {}).value || "quick";
+      var depth = depthSelect ? depthSelect.value : "quick";
       var data = {
         query: query.trim(),
         depth: depth,
@@ -63,10 +109,12 @@
 
       startedAt = Date.now();
       setBusy(true);
+      setWorkflow(1);
       setProgress(MESSAGES[0]);
       var messageIndex = 0;
       var messageTimer = window.setInterval(function () {
         messageIndex = Math.min(messageIndex + 1, MESSAGES.length - 1);
+        setWorkflow(messageIndex);
         setProgress(MESSAGES[messageIndex]);
       }, 45000);
 
@@ -76,6 +124,7 @@
           window.clearInterval(messageTimer);
           setBusy(false);
           if (progress) progress.classList.add("d-none");
+          if (workflow) workflow.classList.add("d-none");
           var id = result.investigation_id;
           if (id) {
             aiToast("Investigation completed.", "success");
@@ -87,7 +136,8 @@
         .catch(function (err) {
           window.clearInterval(messageTimer);
           setBusy(false);
-          setProgress("Failed");
+          if (progress) progress.classList.add("d-none");
+          if (workflow) workflow.classList.add("d-none");
           aiToast(err.message, "danger");
         });
     });

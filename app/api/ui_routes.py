@@ -25,7 +25,7 @@ from app.agents.critic_agent import CriticAgent
 from app.agents.evidence_agent import EvidenceAgent
 from app.agents.orchestrator import InvestigationOrchestrator
 from app.agents.research_agent import ResearchAgent
-from app.core.config import PROJECT_ROOT
+from app.core.config import PROJECT_ROOT, settings
 from app.database.provider import get_persistence_provider
 from app.evidence.factory import create_evidence_extractor
 from app.graph.extraction.factory import create_graph_extraction_provider
@@ -60,7 +60,7 @@ def _render(
     return templates.TemplateResponse(
         request,
         name,
-        {"request": request, **context},
+        {"request": request, "app_settings": settings, **context},
         status_code=status_code,
     )
 

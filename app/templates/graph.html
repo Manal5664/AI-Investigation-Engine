@@ -10,9 +10,22 @@
       <span class="ai-mono small text-body-tertiary ms-1" id="graphStats"></span>
     </p>
   </div>
-  <div class="d-flex align-items-center gap-2">
+  <div class="d-flex align-items-center gap-2 flex-wrap">
+    <label for="graphTypeFilter" class="form-label mb-0 text-body-secondary small">Type</label>
+    <select id="graphTypeFilter" class="form-select form-select-sm w-auto" aria-label="Filter graph by node type">
+      <option value="">All types</option>
+      <option value="investigation">Investigation</option>
+      <option value="claim">Claim</option>
+      <option value="evidence">Evidence</option>
+      <option value="source">Source</option>
+      <option value="person">Person</option>
+      <option value="organization">Org</option>
+      <option value="location">Location</option>
+      <option value="event">Event</option>
+      <option value="topic">Topic</option>
+    </select>
     <label for="investigationSelect" class="form-label mb-0 text-body-secondary small">Investigation</label>
-    <select id="investigationSelect" class="form-select form-select-sm w-auto">
+    <select id="investigationSelect" class="form-select form-select-sm w-auto" aria-label="Filter graph by investigation">
       <option value="">All</option>
     </select>
   </div>
@@ -21,13 +34,16 @@
 <div id="graphMessage" class="alert alert-warning d-none"></div>
 
 <div class="ai-graph-toolbar">
-  <div class="ai-graph-legend">
+  <div class="ai-graph-legend" aria-label="Node type legend">
     <span class="ai-legend-node inv">Investigation</span>
     <span class="ai-legend-node claim">Claim</span>
     <span class="ai-legend-node evidence">Evidence</span>
     <span class="ai-legend-node source">Source</span>
-    <span class="ai-legend-node person" style="--c:#7c3aed"><span class="legend-dot" style="background:#7c3aed"></span>Person</span>
-    <span class="ai-legend-node org" style="--c:#0891b2"><span class="legend-dot" style="background:#0891b2"></span>Org</span>
+    <span class="ai-legend-node person"><span class="legend-dot" style="background:#7c3aed"></span>Person</span>
+    <span class="ai-legend-node org"><span class="legend-dot" style="background:#0891b2"></span>Org</span>
+    <span class="ai-legend-node"><span class="legend-dot" style="background:#b45309"></span>Location</span>
+    <span class="ai-legend-node"><span class="legend-dot" style="background:#dc2626"></span>Event</span>
+    <span class="ai-legend-node"><span class="legend-dot" style="background:#6b7280"></span>Topic</span>
   </div>
 </div>
 

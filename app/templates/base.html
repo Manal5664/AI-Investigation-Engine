@@ -4,6 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{% block title %}EvidenceAI{% endblock %}</title>
+  <link
+    rel="icon"
+    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%234f46e5'/%3E%3Cpath d='M8 22 15 8l7 14Z' fill='%23fff'/%3E%3Ccircle cx='15' cy='24' r='2' fill='%23fcd34d'/%3E%3C/svg%3E"
+  />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
@@ -35,7 +39,7 @@
         <i class="bi bi-list fs-4"></i>
       </button>
       <a class="navbar-brand d-flex align-items-center gap-2" href="/dashboard">
-        <span class="ai-logo"><i class="bi bi-search"></i></span>
+        <span class="ai-logo" aria-hidden="true"><i class="bi bi-search"></i></span>
         <span class="fw-bold">EvidenceAI</span>
         <span class="badge text-bg-primary ai-monobadge d-none d-sm-inline">case intelligence</span>
       </a>
@@ -46,43 +50,47 @@
         <a href="/investigate" class="btn btn-primary ai-icon-btn d-md-none" title="New case">
           <i class="bi bi-plus-lg"></i>
         </a>
-        <button class="btn btn-link ai-icon-btn" id="themeToggle" type="button" title="Toggle theme">
+        <button class="btn btn-link ai-icon-btn" id="themeToggle" data-theme-toggle type="button" title="Toggle theme" aria-label="Toggle theme">
           <i class="bi bi-moon-stars"></i>
         </button>
       </div>
     </div>
   </nav>
 
-  <div class="ai-layout">
-    <aside class="ai-sidebar" id="aiSidebar">
+  <div class="ai-layout" id="aiLayout">
+    <aside class="ai-sidebar" id="aiSidebar" aria-label="Primary">
       <nav class="ai-nav">
         <div class="ai-nav-label">Workspace</div>
-        <a class="ai-nav-item {% if request.path == '/dashboard' %}active{% endif %}" href="/dashboard">
-          <i class="bi bi-speedometer2"></i> Dashboard
+        <a class="ai-nav-item {% if request.path == '/dashboard' %}active{% endif %}" href="/dashboard" {% if request.path == '/dashboard' %}aria-current="page"{% endif %}>
+          <i class="bi bi-speedometer2" aria-hidden="true"></i> Dashboard
         </a>
-        <a class="ai-nav-item {% if request.path == '/investigate' %}active{% endif %}" href="/investigate">
-          <i class="bi bi-search"></i> Investigate
+        <a class="ai-nav-item {% if request.path == '/investigate' %}active{% endif %}" href="/investigate" {% if request.path == '/investigate' %}aria-current="page"{% endif %}>
+          <i class="bi bi-search" aria-hidden="true"></i> Investigate
         </a>
-        <a class="ai-nav-item {% if request.path == '/documents' %}active{% endif %}" href="/documents">
-          <i class="bi bi-folder2-open"></i> Documents
+        <a class="ai-nav-item {% if request.path == '/documents' %}active{% endif %}" href="/documents" {% if request.path == '/documents' %}aria-current="page"{% endif %}>
+          <i class="bi bi-folder2-open" aria-hidden="true"></i> Documents
         </a>
-        <a class="ai-nav-item {% if request.path == '/history' %}active{% endif %}" href="/history">
-          <i class="bi bi-clock-history"></i> History
+        <a class="ai-nav-item {% if request.path == '/history' %}active{% endif %}" href="/history" {% if request.path == '/history' %}aria-current="page"{% endif %}>
+          <i class="bi bi-clock-history" aria-hidden="true"></i> History
         </a>
-        <a class="ai-nav-item {% if request.path == '/rag' %}active{% endif %}" href="/rag">
-          <i class="bi bi-chat-left-text"></i> Evidence search
+        <a class="ai-nav-item {% if request.path == '/rag' %}active{% endif %}" href="/rag" {% if request.path == '/rag' %}aria-current="page"{% endif %}>
+          <i class="bi bi-chat-left-text" aria-hidden="true"></i> Evidence search
         </a>
-        <a class="ai-nav-item {% if request.path == '/graph' %}active{% endif %}" href="/graph">
-          <i class="bi bi-diagram-3"></i> Graph view
+        <a class="ai-nav-item {% if request.path == '/graph' %}active{% endif %}" href="/graph" {% if request.path == '/graph' %}aria-current="page"{% endif %}>
+          <i class="bi bi-diagram-3" aria-hidden="true"></i> Graph view
         </a>
         <div class="ai-sidebar-footer">
-          <span class="ai-version">AI-Investigation-Engine</span>
+          <span class="ai-version">AI-Investigation-Engine{% if app_settings %} · v{{ app_settings.APP_VERSION }}{% endif %}</span>
+          <button class="btn btn-link ai-theme-toggle d-none d-lg-inline-flex" id="sidebarThemeToggle" data-theme-toggle type="button" title="Toggle theme" aria-label="Toggle theme">
+            <i class="bi bi-moon-stars"></i>
+          </button>
         </div>
       </nav>
     </aside>
+    <div class="ai-sidebar-backdrop" id="sidebarBackdrop"></div>
 
     <main class="ai-main">
-      <div class="container-fluid px-3 px-lg-4 py-4">
+      <div class="container-fluid ai-page px-3 px-lg-4 py-4">
         {% block content %}{% endblock %}
       </div>
     </main>

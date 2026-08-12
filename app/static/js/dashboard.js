@@ -24,9 +24,25 @@
     Chart.defaults.color = tickColor();
   }
 
+  function emptyChart(canvasId, message) {
+    var canvas = document.getElementById(canvasId);
+    if (!canvas || !canvas.parentElement) return;
+    canvas.remove();
+    var wrap = document.createElement("div");
+    wrap.className = "ai-chart-empty";
+    wrap.innerHTML =
+      '<i class="bi bi-bar-chart-line" aria-hidden="true"></i>' +
+      "<span>" + aiEscape(message) + "</span>";
+    canvas.parentElement.appendChild(wrap);
+  }
+
   function renderLine(canvasId, labels, series) {
     var canvas = document.getElementById(canvasId);
-    if (!canvas || !window.Chart || !labels || labels.length === 0) return;
+    if (!canvas || !window.Chart) return;
+    if (!labels || labels.length === 0) {
+      emptyChart(canvasId, "No activity yet — run an investigation to populate this chart.");
+      return;
+    }
     var datasets = (series || []).map(function (s) {
       return {
         label: s.label,
@@ -59,7 +75,11 @@
 
   function renderDoughnut(canvasId, labels, data) {
     var canvas = document.getElementById(canvasId);
-    if (!canvas || !window.Chart || !labels || labels.length === 0) return;
+    if (!canvas || !window.Chart) return;
+    if (!labels || labels.length === 0) {
+      emptyChart(canvasId, "No investigations yet.");
+      return;
+    }
     var palette = ["#16a34a", "#d97706", "#dc2626"];
     new Chart(canvas.getContext("2d"), {
       type: "doughnut",
@@ -86,7 +106,11 @@
 
   function renderBar(canvasId, labels, data) {
     var canvas = document.getElementById(canvasId);
-    if (!canvas || !window.Chart || !labels || labels.length === 0) return;
+    if (!canvas || !window.Chart) return;
+    if (!labels || labels.length === 0) {
+      emptyChart(canvasId, "No documents uploaded yet.");
+      return;
+    }
     new Chart(canvas.getContext("2d"), {
       type: "bar",
       data: {

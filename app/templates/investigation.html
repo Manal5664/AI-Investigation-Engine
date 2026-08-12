@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% block title %}{{ investigation.investigation.query }} · EvidenceAI{% endblock %}
 {% block body_case_id %}{{ investigation.investigation.id }}{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/cytoscape@3.29.2/dist/cytoscape.min.js"></script>
+{% endblock %}
+
 {% block content %}
 
 <div class="d-flex align-items-start justify-content-between flex-wrap gap-3 mb-4">
@@ -36,6 +41,8 @@
   </div>
 </div>
 
+{% set failed_empty = investigation.investigation.status.value == 'failed' and investigation.investigation.total_source_count == 0 and investigation.investigation.total_evidence_count == 0 %}
+
 <div class="ai-result-header card ai-card mb-4">
   <div class="ai-result-meta">
     <span class="ai-meta-chip"><i class="bi bi-tag"></i> {{ investigation.investigation.depth.value }}</span>
@@ -54,11 +61,11 @@
   </div>
   <div class="ai-result-badges">
     {% if investigation.investigation.status.value == 'completed' %}
-    <span class="badge rounded-pill text-bg-success">Completed</span>
+    <span class="ai-status-strip completed"><i class="bi bi-check-circle"></i> Completed</span>
     {% elif investigation.investigation.status.value == 'failed' %}
-    <span class="badge rounded-pill text-bg-danger">Failed</span>
+    <span class="ai-status-strip failed"><i class="bi bi-x-circle"></i> Failed</span>
     {% else %}
-    <span class="badge rounded-pill text-bg-warning">Partial</span>
+    <span class="ai-status-strip partial"><i class="bi bi-exclamation-triangle"></i> Partial</span>
     {% endif %}
     {% if investigation.investigation.confidence %}
     <span class="badge rounded-pill text-bg-primary">Confidence: {{ investigation.investigation.confidence.value }}</span>
@@ -66,7 +73,24 @@
   </div>
 </div>
 
-{% if investigation.investigation.errors %}
+{% if failed_empty %}
+<div class="ai-error-summary" role="alert">
+  <div class="ai-error-title"><i class="bi bi-exclamation-octagon"></i> Investigation failed before gathering evidence</div>
+  <p class="small text-body-secondary mb-2">
+    No sources or evidence items were produced. Review the provider errors below, then
+    <a href="/investigate">run a new investigation</a>.
+  </p>
+  <ul>
+    {% for error in investigation.investigation.errors %}
+    <li>
+      <strong>{{ error.get("provider", "Unknown provider") }}</strong>
+      {% if error.get("model") %}<span class="ai-mono">({{ error.get("model") }})</span>{% endif %}
+      — {{ error.get("message", "") }}
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% elif investigation.investigation.errors %}
 <div class="alert alert-warning mb-4">
   <div class="fw-semibold mb-1">Issues during the run</div>
   <ul class="mb-0">
@@ -81,32 +105,37 @@
   <div class="ai-card-head">
     <ul class="nav nav-tabs ai-tabs mb-0" role="tablist">
       <li class="nav-item">
-        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabReport" type="button">
+        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabReport" type="button" role="tab" aria-selected="true">
           <i class="bi bi-file-earmark-text me-1"></i> Report
         </button>
       </li>
       <li class="nav-item">
-        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabSteps" type="button">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabSteps" type="button" role="tab" aria-selected="false">
           <i class="bi bi-list-ul me-1"></i> Steps
           <span class="ai-tab-count">{{ investigation.steps|length }}</span>
         </button>
       </li>
       <li class="nav-item">
-        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabSources" type="button">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabSources" type="button" role="tab" aria-selected="false">
           <i class="bi bi-globe2 me-1"></i> Sources
           <span class="ai-tab-count">{{ investigation.sources|length }}</span>
         </button>
       </li>
       <li class="nav-item">
-        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabEvidence" type="button">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabEvidence" type="button" role="tab" aria-selected="false">
           <i class="bi bi-lightbulb me-1"></i> Evidence
           <span class="ai-tab-count">{{ investigation.evidence_items|length }}</span>
         </button>
       </li>
       <li class="nav-item">
-        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabConflicts" type="button">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabConflicts" type="button" role="tab" aria-selected="false">
           <i class="bi bi-exclamation-triangle me-1"></i> Conflicts
           <span class="ai-tab-count">{{ investigation.conflicts|length }}</span>
+        </button>
+      </li>
+      <li class="nav-item">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabGraph" type="button" role="tab" aria-selected="false">
+          <i class="bi bi-diagram-3 me-1"></i> Graph
         </button>
       </li>
     </ul>
@@ -115,27 +144,30 @@
     <div class="tab-content">
       <div class="tab-pane fade show active" id="tabReport">
         {% if investigation.report %}
+        <div class="ai-report">
           <p class="ai-overview-text">{{ investigation.report.overall_evidence_picture }}</p>
           <div class="ai-summary-strip my-4">
             <span><i class="bi bi-shield-check me-1"></i> Confidence: {{ investigation.report.confidence.value }}</span>
             <span><i class="bi bi-file-text me-1"></i> {{ investigation.report.evidence_gaps|length }} evidence gaps</span>
             <span><i class="bi bi-exclamation-triangle me-1"></i> {{ investigation.report.unresolved_conflicts|length }} unresolved conflicts</span>
+            <span><i class="bi bi-globe2 me-1"></i> {{ investigation.investigation.total_source_count }} sources</span>
+            <span><i class="bi bi-lightbulb me-1"></i> {{ investigation.investigation.total_evidence_count }} evidence items</span>
           </div>
           <p class="ai-card-sub"><i class="bi bi-info-circle me-1"></i> Rationale: {{ investigation.report.confidence_rationale }}</p>
           {% if investigation.report.strongest_supporting_evidence %}
-          <div class="ai-strong-card support ai-card mb-3 p-3">
+          <div class="ai-strong-card support ai-card ai-card-hover mb-3 p-3">
             <div class="fw-semibold mb-1"><i class="bi bi-arrow-up-circle text-success me-1"></i> Strongest supporting evidence</div>
             <p class="small text-body-secondary mb-0">{{ investigation.report.strongest_supporting_evidence.get("summary", "") }}</p>
           </div>
           {% endif %}
           {% if investigation.report.strongest_contradicting_evidence %}
-          <div class="ai-strong-card contradict ai-card mb-3 p-3">
+          <div class="ai-strong-card contradict ai-card ai-card-hover mb-3 p-3">
             <div class="fw-semibold mb-1"><i class="bi bi-arrow-down-circle text-danger me-1"></i> Strongest contradicting evidence</div>
             <p class="small text-body-secondary mb-0">{{ investigation.report.strongest_contradicting_evidence.get("summary", "") }}</p>
           </div>
           {% endif %}
           {% if investigation.report.important_limitations %}
-          <h6 class="ai-card-sub mt-4">Limitations</h6>
+          <h6 class="ai-card-sub mt-4"><i class="bi bi-exclamation-triangle me-1"></i> Limitations</h6>
           <ul class="ai-bullets">
             {% for limitation in investigation.report.important_limitations %}
             <li class="small">{{ limitation }}</li>
@@ -143,7 +175,7 @@
           </ul>
           {% endif %}
           {% if investigation.report.alternative_explanations %}
-          <h6 class="ai-card-sub mt-4">Alternative explanations</h6>
+          <h6 class="ai-card-sub mt-4"><i class="bi bi-arrow-repeat me-1"></i> Alternative explanations</h6>
           <ul class="ai-bullets">
             {% for alternative in investigation.report.alternative_explanations %}
             <li class="small">{{ alternative }}</li>
@@ -151,18 +183,24 @@
           </ul>
           {% endif %}
           {% if investigation.report.evidence_gaps %}
-          <h6 class="ai-card-sub mt-4">Evidence gaps</h6>
+          <h6 class="ai-card-sub mt-4"><i class="bi bi-folder-minus me-1"></i> Evidence gaps</h6>
           <ul class="ai-bullets">
             {% for gap in investigation.report.evidence_gaps %}
             <li class="small">{{ gap }}</li>
             {% endfor %}
           </ul>
           {% endif %}
-        {% else %}
-          <div class="ai-empty">
-            <i class="bi bi-file-earmark-text"></i>
-            <p>No report was produced for this investigation.</p>
+          <div class="ai-disclaimer">
+            <i class="bi bi-shield-exclamation" aria-hidden="true"></i>
+            <span>This report is an evidence assessment produced by automated analysis. It describes the
+            completeness and consistency of the evidence picture and is not a truth verdict.</span>
           </div>
+        </div>
+        {% else %}
+        <div class="ai-empty">
+          <i class="bi bi-file-earmark-text"></i>
+          <p>No report was produced for this investigation.</p>
+        </div>
         {% endif %}
       </div>
 
@@ -218,7 +256,7 @@
       <div class="tab-pane fade" id="tabSources">
         {% if investigation.sources %}
           {% for source in investigation.sources %}
-          <div class="card ai-card ai-evidence-card mb-3">
+          <div class="card ai-card ai-evidence-card ai-source-card mb-3">
             <div class="ai-source-head">
               <div>
                 <h5 class="ai-source-title">{{ source.title }}</h5>
@@ -231,7 +269,7 @@
             {% endif %}
             <div class="ai-source-meta">
               <a class="ai-source-link" href="{{ source.url }}" target="_blank" rel="noopener noreferrer">
-                {{ source.url }}
+                <i class="bi bi-box-arrow-up-right me-1"></i>{{ source.url }}
               </a>
               <span class="ai-source-retrieved">Retrieved {{ source.retrieved_at }}</span>
             </div>
@@ -254,7 +292,7 @@
       <div class="tab-pane fade" id="tabEvidence">
         {% if investigation.evidence_items %}
           {% for item in investigation.evidence_items %}
-          <div class="card ai-card ai-evidence-card mb-3">
+          <div class="card ai-card ai-evidence-card ai-evidence-{{ item.stance.value }} mb-3">
             <div class="ai-evidence-head">
               <div class="ai-evidence-summary">{{ item.summary }}</div>
               <div class="ai-evidence-badges">
@@ -286,14 +324,20 @@
               {% endif %}
               <span class="ai-mono small text-body-tertiary">{{ item.evidence_id }}</span>
             </div>
-            <div class="ai-evidence-meta">
-              <span><i class="bi bi-hdd me-1"></i> {{ item.extraction_method }}</span>
-              <span><i class="bi bi-cpu me-1"></i> {{ item.model_used }}</span>
-              {% if item.page %}
-              <span><i class="bi bi-file-text me-1"></i> page {{ item.page }}</span>
-              {% endif %}
-              <span><i class="bi bi-clock me-1"></i> {{ item.retrieval_timestamp }}</span>
-            </div>
+            <details class="ai-evidence-passage">
+              <summary>Provenance</summary>
+              <div class="ai-evidence-meta">
+                <span><i class="bi bi-hdd me-1"></i> {{ item.extraction_method }}</span>
+                <span><i class="bi bi-cpu me-1"></i> {{ item.model_used }}</span>
+                {% if item.page %}
+                <span><i class="bi bi-file-text me-1"></i> page {{ item.page }}</span>
+                {% endif %}
+                <span><i class="bi bi-clock me-1"></i> {{ item.retrieval_timestamp }}</span>
+                {% if item.source_id %}
+                <span><i class="bi bi-diagram-3 me-1"></i> {{ item.source_id }}</span>
+                {% endif %}
+              </div>
+            </details>
           </div>
           {% endfor %}
         {% else %}
@@ -332,6 +376,20 @@
         <div class="ai-empty"><i class="bi bi-exclamation-triangle"></i><p>No evidence conflicts recorded.</p></div>
         {% endif %}
       </div>
+
+      <div class="tab-pane fade" id="tabGraph">
+        <div class="position-relative">
+          <div id="resultGraphCanvas" class="ai-cyto"></div>
+        </div>
+        <div id="resultGraphDetails" class="d-none mt-3">
+          <div class="card ai-card mb-0 p-3"></div>
+        </div>
+        <p class="ai-hint mt-2">
+          <i class="bi bi-info-circle me-1"></i>
+          Entities extracted for this investigation from the shared knowledge graph.
+          Click a node to inspect it.
+        </p>
+      </div>
     </div>
   </div>
 </div>
@@ -339,6 +397,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/js/result_graph.js"></script>
 <script>
 (function () {
   "use strict";

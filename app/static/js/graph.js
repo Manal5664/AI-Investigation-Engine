@@ -38,6 +38,18 @@
   var cy = null;
   var currentData = { nodes: [], edges: [] };
   var currentFilter = "";
+  var currentTypeFilter = "";
+
+  function showEmptyState(message) {
+    var container = document.getElementById("graphCanvas");
+    if (container) {
+      container.innerHTML =
+        '<div class="ai-graph-empty">' +
+        '<i class="bi bi-diagram-3" aria-hidden="true"></i>' +
+        "<span>" + aiEscape(message) + "</span>" +
+        "</div>";
+    }
+  }
 
   function buildElements(data) {
     var elements = [];
@@ -91,6 +103,9 @@
 
     if (nodeIds.size === 0) {
       showMessage("No graph data yet — run an investigation with graph extraction to populate the graph.");
+      showEmptyState(
+        "No graph data yet — run an investigation with graph extraction to populate the graph."
+      );
       return;
     }
     hideMessage();
@@ -218,43 +233,56 @@
 
   function applyFilter() {
     var data = { nodes: [], edges: [] };
+    var sourceNodes = currentData.nodes || [];
     if (currentFilter) {
-      data.nodes = (currentData.nodes || []).filter(function (n) {
+      sourceNodes = sourceNodes.filter(function (n) {
         return n.investigation_id === currentFilter;
       });
-      var allowed = new Set(data.nodes.map(function (n) { return n.id; }));
-      data.edges = (currentData.edges || []).filter(function (e) {
-        return allowed.has(e.source) && allowed.has(e.target);
-      });
-    } else {
-      data = currentData;
     }
+    if (currentTypeFilter) {
+      sourceNodes = sourceNodes.filter(function (n) {
+        return (n.node_type || "unknown") === currentTypeFilter;
+      });
+    }
+    data.nodes = sourceNodes;
+    var allowed = new Set(data.nodes.map(function (n) { return n.id; }));
+    data.edges = (currentData.edges || []).filter(function (e) {
+      return allowed.has(e.source) && allowed.has(e.target);
+    });
     renderGraph(data);
   }
 
   function populateSelector() {
     var select = document.getElementById("investigationSelect");
-    if (!select) return;
-    api
-      .get("/api/v1/investigations?limit=100")
-      .then(function (data) {
-        var items = data.investigations || [];
-        select.innerHTML =
-          '<option value="">All investigations</option>' +
-          items
-            .map(function (r) {
-              return '<option value="' + aiEscape(r.id) + '">' + aiEscape(r.query) + "</option>";
-            })
-            .join("");
-      })
-      .catch(function () {
-        select.innerHTML = '<option value="">All investigations</option>';
-      });
+    var typeFilter = document.getElementById("graphTypeFilter");
+    if (select) {
+      api
+        .get("/api/v1/investigations?limit=100")
+        .then(function (data) {
+          var items = data.investigations || [];
+          select.innerHTML =
+            '<option value="">All investigations</option>' +
+            items
+              .map(function (r) {
+                return '<option value="' + aiEscape(r.id) + '">' + aiEscape(r.query) + "</option>";
+              })
+              .join("");
+        })
+        .catch(function () {
+          select.innerHTML = '<option value="">All investigations</option>';
+        });
 
-    select.addEventListener("change", function () {
-      currentFilter = select.value;
-      applyFilter();
-    });
+      select.addEventListener("change", function () {
+        currentFilter = select.value;
+        applyFilter();
+      });
+    }
+    if (typeFilter) {
+      typeFilter.addEventListener("change", function () {
+        currentTypeFilter = typeFilter.value;
+        applyFilter();
+      });
+    }
   }
 
   document.addEventListener("DOMContentLoaded", function () {
