@@ -16,6 +16,22 @@ class HealthResponse(StrictResponseModel):
     environment: str
 
 
+class LivenessResponse(StrictResponseModel):
+    status: Literal["alive"]
+
+
+class ReadinessCheck(StrictResponseModel):
+    name: str
+    ok: bool
+    detail: str | None = None
+
+
+class ReadinessResponse(StrictResponseModel):
+    status: Literal["ready", "not_ready"]
+    persistence_provider: str
+    checks: list[ReadinessCheck]
+
+
 class ErrorDetail(StrictResponseModel):
     field: str
     message: str

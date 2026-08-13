@@ -4,6 +4,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from app.core.exceptions import ApplicationConfigurationError
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -64,6 +66,18 @@ def _read_optional_secret(name: str) -> str | None:
         return None
     value = raw_value.strip()
     return value or None
+
+
+def _read_origins(name: str) -> tuple[str, ...]:
+    """Read a comma-separated list of allowed CORS origins."""
+    raw_value = os.getenv(name)
+    if not raw_value:
+        return ()
+    return tuple(
+        origin.strip()
+        for origin in raw_value.split(",")
+        if origin.strip()
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +157,13 @@ class Settings:
     )
     DATABASE_URL: str = os.getenv("DATABASE_URL", "").strip()
     DATABASE_ECHO: bool = _read_bool("DATABASE_ECHO")
+    HOST: str = os.getenv("HOST", "127.0.0.1")
+    PORT: int = _read_positive_int("PORT", 8000)
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    LOG_JSON: bool = _read_bool("LOG_JSON")
+    CORS_ALLOWED_ORIGINS: tuple[str, ...] = field(
+        default_factory=lambda: _read_origins("CORS_ALLOWED_ORIGINS"),
+    )
 
     def __post_init__(self) -> None:
         if self.RAG_CHUNK_OVERLAP >= self.RAG_CHUNK_SIZE:
@@ -150,5 +171,71 @@ class Settings:
                 "RAG_CHUNK_OVERLAP must be smaller than RAG_CHUNK_SIZE"
             )
 
+    def is_production(self) -> bool:
+        return self.ENVIRONMENT.strip().casefold() == "production"
+
 
 settings = Settings()
+
+
+def validate_production_configuration(
+    active: Settings | None = None,
+) -> None:
+    """Fail fast when production configuration is missing or unsafe.
+
+    Development and testing environments are intentionally unconstrained so
+    the in-memory providers and mock AI providers remain available. Production
+    must use SQLAlchemy-backed persistence (PostgreSQL), disable DEBUG, and
+    supply an API key whenever a Gemini-backed provider is selected.
+    """
+    cfg = active or settings
+    if not cfg.is_production():
+        return
+
+    problems: list[str] = []
+    persistence_provider = cfg.PERSISTENCE_PROVIDER.strip().casefold()
+    database_url = cfg.DATABASE_URL.strip()
+    if persistence_provider == "sqlalchemy":
+        if not database_url:
+            problems.append(
+                "PERSISTENCE_PROVIDER=sqlalchemy requires a non-empty "
+                "DATABASE_URL."
+            )
+        elif database_url.casefold().startswith("sqlite"):
+            problems.append(
+                "Production requires PostgreSQL; DATABASE_URL must not be a "
+                "SQLite URL."
+            )
+    else:
+        problems.append(
+            "Production requires PERSISTENCE_PROVIDER=sqlalchemy backed by "
+            "PostgreSQL. The in-memory persistence provider is process-local "
+            "and is cleared on restart."
+        )
+
+    if cfg.DEBUG:
+        problems.append("DEBUG must be false in production.")
+
+    gemini_providers: dict[str, str] = {
+        "LLM_PROVIDER": cfg.LLM_PROVIDER,
+        "EVIDENCE_PROVIDER": cfg.EVIDENCE_PROVIDER,
+        "SEARCH_PROVIDER": cfg.SEARCH_PROVIDER,
+        "EMBEDDING_PROVIDER": cfg.EMBEDDING_PROVIDER,
+        "VISION_PROVIDER": cfg.VISION_PROVIDER,
+        "GRAPH_EXTRACTION_PROVIDER": cfg.GRAPH_EXTRACTION_PROVIDER,
+    }
+    gemini_provider_names = {"gemini", "gemini_grounded"}
+    for name, value in gemini_providers.items():
+        if (
+            value.strip().casefold() in gemini_provider_names
+            and not cfg.GEMINI_API_KEY
+        ):
+            problems.append(
+                f"{name} selects a Gemini provider but GEMINI_API_KEY is not "
+                "set."
+            )
+
+    if problems:
+        raise ApplicationConfigurationError(
+            "Production configuration is invalid: " + "; ".join(problems)
+        )

@@ -457,6 +457,144 @@ def _investigation_records() -> tuple:
     return investigation, steps, sources, evidence, conflicts, report
 
 
+def test_route_helpers_work_with_transactional_provider() -> None:
+    from sqlalchemy.orm import sessionmaker
+
+    from app.database import models  # noqa: F401  (register tables)
+    from app.database.base import Base
+    from app.database.uow import SqlAlchemyUnitOfWork
+
+    engine = _sqlalchemy_engine()
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+
+    class _TransactionalProvider:
+        name = "sqlalchemy"
+        requires_transaction = True
+
+        def unit_of_work(self):
+            return SqlAlchemyUnitOfWork(factory)
+
+    provider = _TransactionalProvider()
+
+    async def exercise() -> None:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            with patch(
+                "app.api.v1.persistence_routes.get_persistence_provider",
+                return_value=provider,
+            ):
+                created = await client.post(
+                    "/api/v1/users",
+                    json={
+                        "email": "route-sql@example.com",
+                        "display_name": "Route SQL",
+                    },
+                )
+                assert created.status_code == 200
+
+                fetched = await client.get(
+                    f"/api/v1/users/{created.json()['user']['id']}"
+                )
+                assert fetched.status_code == 200
+                assert (
+                    fetched.json()["user"]["email"]
+                    == "route-sql@example.com"
+                )
+
+                listed = await client.get("/api/v1/investigations")
+                assert listed.status_code == 200
+                assert listed.json()["total"] == 0
+
+                listed = await client.get("/api/v1/documents")
+                assert listed.status_code == 200
+                assert listed.json()["total"] == 0
+
+    asyncio.run(exercise())
+    engine.dispose()
+
+
+def test_agentic_run_persists_to_transactional_provider() -> None:
+    from sqlalchemy.orm import sessionmaker
+
+    from app.database import models  # noqa: F401  (register tables)
+    from app.database.base import Base
+    from app.database.uow import SqlAlchemyUnitOfWork
+
+    engine = _sqlalchemy_engine()
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+
+    class _TransactionalProvider:
+        name = "sqlalchemy"
+        requires_transaction = True
+
+        def unit_of_work(self):
+            return SqlAlchemyUnitOfWork(factory)
+
+    provider = _TransactionalProvider()
+
+    async def exercise() -> None:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            with (
+                patch(
+                    "app.api.v1.routes.create_search_provider",
+                    return_value=MockSearchProvider(),
+                ),
+                patch(
+                    "app.api.v1.routes.create_evidence_extractor",
+                    return_value=MockEvidenceExtractor(),
+                ),
+                patch(
+                    "app.api.v1.routes.get_persistence_provider",
+                    return_value=provider,
+                ),
+                patch(
+                    "app.api.v1.persistence_routes.get_persistence_provider",
+                    return_value=provider,
+                ),
+            ):
+                response = await client.post(
+                    "/api/v1/investigations/agentic",
+                    json=_agentic_body(),
+                )
+                assert response.status_code == 200
+                result = response.json()
+                assert result["state"]["status"] in {
+                    "completed",
+                    "partial",
+                }
+
+                listed = await client.get("/api/v1/investigations")
+                assert listed.status_code == 200
+                payload = listed.json()
+                assert payload["total"] == 1
+                summary = payload["investigations"][0]
+                assert summary["query"] == _agentic_body()["query"]
+
+                detail = await client.get(
+                    f"/api/v1/investigations/{summary['id']}"
+                )
+                assert detail.status_code == 200
+                body = detail.json()
+                assert body["investigation"]["id"] == summary["id"]
+                assert body["steps"]
+                assert body["steps"][-1]["step_name"] == "synthesis_produced"
+                assert body["sources"]
+                assert body["evidence_items"]
+                assert body["report"] is not None
+
+    asyncio.run(exercise())
+    engine.dispose()
+
+
 def test_sqlalchemy_repositories_round_trip() -> None:
     from sqlalchemy.orm import sessionmaker
 

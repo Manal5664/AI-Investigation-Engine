@@ -1,5 +1,35 @@
-.venv/
+# Python
 __pycache__/
 *.pyc
+*.pyo
+.venv/
+venv/
+
+# Environment / secrets
 .env
+.env.*
+!.env.example
+
+# Test / coverage artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Local databases (never commit real data)
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary uploads / runtime files
+uploads/
+tmp/
+*.log
+logs/
+
+# IDE / editor files
 .vscode/
+.idea/
+*.swp
+.DS_Store

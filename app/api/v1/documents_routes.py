@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, Query, UploadFile
 from app.core.config import settings
 from app.database.persistence_gateway import DocumentPersistenceGateway
 from app.database.provider import get_persistence_provider
-from app.documents.base import DocumentStore
+from app.documents.base import DocumentStore, DocumentValidationError
 from app.documents.extractors.factory import ExtractorFactory
 from app.documents.factory import get_document_store
 from app.documents.reporting import DocumentReportGeneratorError
@@ -93,10 +93,26 @@ def _investigation_service(
 _executor = ThreadPoolExecutor(max_workers=4)
 
 
-async def _read_upload_bytes(files: list[UploadFile]) -> list[tuple[str, str, bytes]]:
+async def _read_upload_bytes(
+    files: list[UploadFile],
+    *,
+    max_bytes: int,
+    max_per_request: int,
+) -> list[tuple[str, str, bytes]]:
+    if len(files) > max_per_request:
+        raise DocumentValidationError(
+            f"a request may upload at most {max_per_request} documents"
+        )
+
     def _read_one(file: UploadFile) -> tuple[str, str, bytes]:
-        content = file.file.read()
-        return (file.filename or "untitled", file.content_type or "", content)
+        filename = file.filename or "untitled"
+        content = file.file.read(max_bytes + 1)
+        if len(content) > max_bytes:
+            raise DocumentValidationError(
+                f"document '{filename}' exceeds the maximum allowed size "
+                f"of {max_bytes} bytes"
+            )
+        return (filename, file.content_type or "", content)
 
     loop = asyncio.get_running_loop()
     return await asyncio.gather(
@@ -120,7 +136,11 @@ async def upload_documents(
         from fastapi import HTTPException
 
         raise HTTPException(status_code=422, detail="no files were uploaded")
-    uploaded = await _read_upload_bytes(files)
+    uploaded = await _read_upload_bytes(
+        files,
+        max_bytes=settings.DOCUMENT_MAX_UPLOAD_BYTES,
+        max_per_request=settings.DOCUMENT_MAX_PER_REQUEST,
+    )
     results = await service.ingest(uploaded)
     return UploadDocumentsResponse(
         status="completed",

@@ -1,0 +1,82 @@
+name: evidenceai
+
+# Local production-like testing stack: EvidenceAI + PostgreSQL.
+#
+# Variable substitution pulls from the shell or a project-local `.env` file.
+# The defaults below are DEVELOPMENT-ONLY and must be overridden before any
+# real deployment. Production secrets (database password, GEMINI_API_KEY) are
+# never stored in this file; supply them through the environment / secret
+# manager, e.g.:
+#   POSTGRES_PASSWORD=$(read_secret) docker compose up --build
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-investigator}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_dev_only}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_investigation}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-investigator} -d ${POSTGRES_DB:-ai_investigation}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Controlled migration step: runs exactly once, before the app starts, so
+  # web workers never race each other running migrations.
+  migrate:
+    build: .
+    environment: &app_env
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DEBUG: "false"
+      PERSISTENCE_PROVIDER: sqlalchemy
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-investigator}:${POSTGRES_PASSWORD:-change_me_dev_only}@db:5432/${POSTGRES_DB:-ai_investigation}
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      LLM_MODEL: ${LLM_MODEL:-mock-investigator}
+      EVIDENCE_PROVIDER: ${EVIDENCE_PROVIDER:-mock}
+      SEARCH_PROVIDER: ${SEARCH_PROVIDER:-mock}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-mock}
+      VISION_PROVIDER: ${VISION_PROVIDER:-mock}
+      GRAPH_EXTRACTION_PROVIDER: ${GRAPH_EXTRACTION_PROVIDER:-mock}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_JSON: ${LOG_JSON:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+
+  app:
+    build: .
+    environment: *app_env
+    ports:
+      - "${PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

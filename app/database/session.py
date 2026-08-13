@@ -12,14 +12,17 @@ repository fallback is used instead.
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from logging import getLogger
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.config import settings
 from app.core.exceptions import ApplicationConfigurationError
+
+logger = getLogger("app.database")
 
 
 def normalize_database_url(database_url: str) -> str:
@@ -119,6 +122,20 @@ def create_all_tables(database_url: str | None = None) -> None:
     engine.dispose()
 
 
+def check_database_connection() -> bool:
+    """Return whether the configured database answers a trivial query."""
+    engine = get_shared_engine()
+    if engine is None:
+        return False
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        logger.warning("database readiness check failed", exc_info=True)
+        return False
+
+
 @contextmanager
 def session_scope(
     database_url: str | None = None,
@@ -142,6 +159,7 @@ def session_scope(
 
 
 __all__ = [
+    "check_database_connection",
     "create_all_tables",
     "create_database_engine",
     "create_session_factory",

@@ -41,22 +41,31 @@ class Repositories:
 class SqlAlchemyUnitOfWork:
     """SQLAlchemy transaction scope.
 
-    Usage::
+    Constructing the unit of work opens a session and binds the repository
+    set, so it can be used either as a context manager::
 
         with SqlAlchemyUnitOfWork(session_factory) as uow:
             uow.repositories.users.create(record)
             uow.commit()
 
-    Commits on clean exit, rolls back when an exception escapes, and always
-    closes the session.
+    or with explicit boundaries (the async route helpers marshall the work
+    onto a worker thread and manage the scope themselves)::
+
+        uow = SqlAlchemyUnitOfWork(session_factory)
+        try:
+            uow.repositories.users.create(record)
+            uow.commit()
+        except Exception:
+            uow.rollback()
+            raise
+        finally:
+            uow.close()
+
+    Commits on clean context exit, rolls back when an exception escapes, and
+    always closes the session.
     """
 
     def __init__(self, session_factory) -> None:
-        self._session_factory = session_factory
-        self.session = None
-        self.repositories: Repositories | None = None
-
-    def __enter__(self) -> "SqlAlchemyUnitOfWork":
         from app.database.repositories.sqlalchemy import (
             SqlAlchemyDocumentRepository,
             SqlAlchemyEvidenceRepository,
@@ -65,7 +74,7 @@ class SqlAlchemyUnitOfWork:
             SqlAlchemyUserRepository,
         )
 
-        self.session = self._session_factory()
+        self.session = session_factory()
         self.repositories = Repositories(
             users=SqlAlchemyUserRepository(self.session),
             investigations=SqlAlchemyInvestigationRepository(self.session),
@@ -73,6 +82,8 @@ class SqlAlchemyUnitOfWork:
             sources=SqlAlchemySourceRepository(self.session),
             evidence=SqlAlchemyEvidenceRepository(self.session),
         )
+
+    def __enter__(self) -> "SqlAlchemyUnitOfWork":
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> None:
@@ -83,16 +94,15 @@ class SqlAlchemyUnitOfWork:
         self.close()
 
     def commit(self) -> None:
-        assert self.session is not None
         self.session.commit()
 
     def rollback(self) -> None:
-        assert self.session is not None
         self.session.rollback()
 
     def close(self) -> None:
         if self.session is not None:
             self.session.close()
+            self.session = None
 
 
 class InMemoryUnitOfWork:

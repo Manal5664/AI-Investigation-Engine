@@ -13,6 +13,7 @@ from sqlalchemy import create_engine
 from app.core.config import settings
 from app.database.base import Base
 from app.database import models  # noqa: F401  (register tables on Base.metadata)
+from app.database.session import normalize_database_url
 
 config = context.config
 
@@ -23,7 +24,13 @@ target_metadata = Base.metadata
 
 
 def _database_url() -> str:
-    return settings.DATABASE_URL.strip()
+    raw_url = settings.DATABASE_URL.strip()
+    if not raw_url:
+        raise RuntimeError(
+            "DATABASE_URL is not configured; set it to a PostgreSQL or "
+            "SQLite URL before running Alembic migrations."
+        )
+    return normalize_database_url(raw_url)
 
 
 def run_migrations_offline() -> None:

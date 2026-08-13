@@ -1,0 +1,41 @@
+# Git / VCS
+.git
+.gitignore
+.github
+
+# Virtual environments and caches
+.venv
+venv
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+
+# Environment / secrets (never in an image)
+.env
+.env.*
+!.env.example
+
+# Tests and dev tooling (production image does not need them)
+tests
+app/tests
+scripts
+
+# Local databases and temporary files
+*.db
+*.sqlite
+*.sqlite3
+uploads
+tmp
+*.log
+logs
+.coverage
+htmlcov
+
+# IDE / editor files
+.vscode
+.idea
+.DS_Store
+
+# Documentation (kept out of the runtime image)
+README.md

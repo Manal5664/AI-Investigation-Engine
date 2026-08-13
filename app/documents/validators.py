@@ -52,6 +52,24 @@ def _kind_from_extension(filename: str) -> DocumentKind | None:
     return SUPPORTED_EXTENSIONS.get(suffix)
 
 
+def _sanitize_filename(filename: str) -> str:
+    """Strip directory components and unsafe characters from a filename.
+
+    Browser-supplied filenames can contain path separators (``../``, ``..\\``)
+    and control characters; the stored name must never be usable for path
+    traversal.
+    """
+    normalized = filename.replace("\\", "/")
+    name = normalized.rsplit("/", 1)[-1]
+    name = "".join(ch for ch in name if ord(ch) >= 32 and ord(ch) != 127)
+    name = name.strip()
+    if not name:
+        raise DocumentValidationError("document filename must not be empty")
+    if len(name) > 255:
+        raise DocumentValidationError("document filename is too long")
+    return name
+
+
 def _mime_to_kind(mime_type: str) -> DocumentKind | None:
     normalized = (mime_type or "").split(";")[0].strip().lower()
     return DETECTED_MIME_TO_KIND.get(normalized)
@@ -71,7 +89,7 @@ def validate_upload(
     """Validate a single document upload and derive its metadata."""
     if not filename or not filename.strip():
         raise DocumentValidationError("document filename must not be empty")
-    filename = filename.strip()
+    filename = _sanitize_filename(filename)
 
     if not content:
         raise DocumentValidationError(f"document '{filename}' is empty")

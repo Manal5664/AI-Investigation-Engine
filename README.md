@@ -417,7 +417,9 @@ AI-Investigation-Engine/
 │   ├── core/
 │   │   ├── __init__.py
 │   │   ├── config.py
-│   │   └── exceptions.py
+│   │   ├── exceptions.py
+│   │   ├── logging.py
+│   │   └── middleware.py
 │   ├── database/
 │   │   ├── __init__.py
 │   │   ├── base.py
@@ -516,6 +518,11 @@ AI-Investigation-Engine/
 │   └── test_source_credibility.py
 ├── .env.example
 ├── .gitignore
+├── Dockerfile
+├── compose.yaml
+├── .github/
+│   └── workflows/
+│       └── test.yml
 ├── README.md
 ├── requirements-dev.txt
 └── requirements.txt
@@ -586,6 +593,11 @@ The application reads these optional environment variables:
 | `PERSISTENCE_PROVIDER` | `in_memory` |
 | `DATABASE_URL` | unset |
 | `DATABASE_ECHO` | `false` |
+| `HOST` | `127.0.0.1` |
+| `PORT` | `8000` |
+| `LOG_LEVEL` | `INFO` |
+| `LOG_JSON` | `false` |
+| `CORS_ALLOWED_ORIGINS` | empty |
 
 The application loads a project-root `.env` file when present. Explicit process
 environment variables take precedence. Set `APP_ENV_FILE` to another path to
@@ -654,12 +666,201 @@ All real scripts require `GEMINI_API_KEY`. They never print the key. Model and
 grounded-search usage may consume quota or incur charges, so these scripts are
 opt-in and are never run by the automated test suite.
 
+## Production and deployment
+
+### Environment separation
+
+Set `ENVIRONMENT` to `development`, `testing`, or `production`. Production
+enforces safe configuration at startup and fails fast (the process exits)
+when any of the following is wrong:
+
+- `PERSISTENCE_PROVIDER` is not `sqlalchemy` (in-memory persistence is
+  process-local and cleared on restart, so it is rejected in production).
+- `DATABASE_URL` is missing or points at SQLite (PostgreSQL is required).
+- `DEBUG=true`.
+- A Gemini-backed provider is selected (`LLM_PROVIDER`, `EVIDENCE_PROVIDER`,
+  `SEARCH_PROVIDER`, `EMBEDDING_PROVIDER`, `VISION_PROVIDER`, or
+  `GRAPH_EXTRACTION_PROVIDER` is `gemini`/`gemini_grounded`) without
+  `GEMINI_API_KEY`.
+
+Development and testing stay unconstrained: the in-memory persistence and mock
+AI providers remain available so local work and the offline test suite need no
+database or API key. `GEMINI_API_KEY` is required only when a Gemini provider is
+actually selected.
+
+### Local development (unchanged)
+
+```powershell
+python -m uvicorn app.main:app --reload
+```
+
+### Production server
+
+A thin launcher reads `HOST` and `PORT` from the environment
+(platforms commonly inject `PORT`):
+
+```powershell
+python -m scripts.run
+```
+
+Equivalent direct command:
+
+```powershell
+python -m uvicorn app.main:app --host 0.0.0.0 --port "${env:PORT}"
+```
+
+Run a single worker: the vector and graph stores are process-local (see
+Limitations), so multiple uvicorn workers would not share them. Scale out
+behind a load balancer only when persistent vector/graph stores exist.
+
+### Docker image
+
+```powershell
+docker build -t evidenceai .
+```
+
+Run it (PostgreSQL must already be reachable and migrated):
+
+```powershell
+docker run -d -p 8000:8000 `
+  -e ENVIRONMENT=production `
+  -e PERSISTENCE_PROVIDER=sqlalchemy `
+  -e DATABASE_URL="postgresql+psycopg://investigator:PASSWORD@dbhost:5432/ai_investigation" `
+  -e GEMINI_API_KEY="<your-key>" `
+  evidenceai
+```
+
+The image is `python:3.12-slim`, installs runtime dependencies only, runs as a
+non-root `appuser`, exposes port `8000`, and includes a liveness healthcheck.
+No API keys are baked into the image; supply them through the environment or a
+secret manager.
+
+### Docker Compose (local production-like stack)
+
+```powershell
+docker compose up --build
+```
+
+`compose.yaml` starts PostgreSQL plus the app and a one-shot `migrate` service
+that runs `alembic upgrade head` before the app starts. A named volume
+(`postgres_data`) keeps the database across restarts. Default credentials in
+the compose file are development-only placeholders; supply real secrets through
+the environment, for example:
+
+```powershell
+$env:POSTGRES_PASSWORD="<real-password>"
+$env:GEMINI_API_KEY="<real-key>"
+docker compose up --build
+```
+
+Production secrets must always be supplied externally — never commit them.
+
+### Database migrations
+
+Run migrations before starting the application:
+
+```powershell
+$env:DATABASE_URL="postgresql+psycopg://investigator:PASSWORD@dbhost:5432/ai_investigation"
+alembic upgrade head
+```
+
+Migration workflow:
+
+```powershell
+alembic revision --autogenerate -m "description"
+alembic upgrade head
+```
+
+`alembic check` verifies the schema and models are in sync. In Docker Compose
+the `migrate` service executes `alembic upgrade head` as a controlled step
+before any web worker starts, so workers never race one another applying
+migrations. `postgres://` and `postgresql://` URLs are automatically normalized
+to the bundled `psycopg` driver.
+
+### Health endpoints
+
+| Method | Path | Semantics |
+| --- | --- | --- |
+| `GET` | `/health` | Backward-compatible service health and environment |
+| `GET` | `/health/live` | Process/application is alive; no external dependencies |
+| `GET` | `/health/ready` | Ready to serve; checks the configured persistence (a cheap `SELECT 1` for SQLAlchemy), returns `503` when not ready |
+
+Health responses never expose secrets, API keys, or the full `DATABASE_URL`.
+
+### Logging and request IDs
+
+The `app` logger namespace is configured once at startup. Set `LOG_LEVEL`
+(`DEBUG`/`INFO`/`WARNING`/`ERROR`) and `LOG_JSON=true` for single-line JSON
+records suitable for log aggregators. Every HTTP request is logged with
+method, path, status, duration (ms), and a request ID.
+
+`X-Request-ID` is accepted when it is a safe value (letters, digits, `.`, `_`,
+`:`, `-`, up to 128 characters); anything unsafe or oversized is replaced with
+a generated ID. The ID is returned on every response and stored on
+`request.state.request_id`. Logs never include query strings, bodies, API keys,
+authorization values, database credentials, or full investigation contents.
+
+### Security
+
+- CORS is disabled by default (the browser UI is served same-origin by this
+  FastAPI application). If CORS is needed, set `CORS_ALLOWED_ORIGINS` to an
+  explicit comma-separated origin list; production never defaults to `*`.
+- Every response carries `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: same-origin`, `X-Frame-Options: DENY`, and a
+  `Content-Security-Policy` tuned for the CDN-based frontend (jsDelivr
+  scripts, Google Fonts, Bootstrap Icons, inline styles/scripts).
+  `script-src` and `style-src` include `'unsafe-inline'` because the existing
+  templates use inline scripts and styles; removing that directive requires
+  frontend changes (nonces/hashes) and is out of scope for this phase.
+- Uploads are validated server-side: per-request count, per-file byte cap
+  enforced before the whole body is read, allowed MIME types/extensions,
+  filename sanitization (directory components and control characters are
+  stripped), and SHA-256 duplicate detection. Browser-side validation is never
+  trusted.
+- Production error responses are generic and never expose Python tracebacks,
+  internal file paths, or configuration values. When `DEBUG=true` (development
+  only) the exception type and message are included for convenience.
+
+### Rate limiting
+
+No in-process or external rate limiter is implemented yet. For a
+production-facing deployment, add rate limiting in front of the expensive
+endpoints:
+
+- `POST /api/v1/investigations/agentic` and `/api/v1/investigations/research`
+  (bounded but multi-call agentic workflows).
+- `POST /api/v1/research/web` (Gemini Google Search grounding is billed per
+  query executed).
+- `POST /api/v1/evidence/extract` (Gemini evidence calls).
+- `POST /api/v1/rag/index`, `/api/v1/documents/*/index`, and document uploads
+  (memory and compute).
+- `/api/v1/investigations/ai-plan` (Gemini LLM calls).
+
+Prefer a gateway/proxy limiter (or a shared store such as Redis) so limits hold
+across multiple workers; a process-local limiter would be incorrect when the
+app is scaled horizontally. Existing provider quota/retry behavior is preserved.
+
+### Deployment target guidance
+
+The Docker image is portable. A simple target for this FastAPI + PostgreSQL
+application is **Railway** or **Render** (managed PostgreSQL, environment
+variables, and Docker deploys with zero extra code), or **Fly.io** /
+**Google Cloud Run** if a managed container platform is preferred. On any
+platform: provision PostgreSQL, set `DATABASE_URL`, run `alembic upgrade head`
+as a release step, set `ENVIRONMENT=production` and
+`PERSISTENCE_PROVIDER=sqlalchemy`, and inject `GEMINI_API_KEY` from a secret
+manager. This repository ships no vendor-specific deployment code so the same
+image can move between targets. No cloud deployment is currently provisioned by
+this project.
+
 ## API endpoints
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/` | Basic service information |
 | `GET` | `/health` | Health and environment status |
+| `GET` | `/health/live` | Liveness probe (no external dependencies) |
+| `GET` | `/health/ready` | Readiness probe (checks persistence; `503` when not ready) |
 | `POST` | `/api/v1/investigations/plan` | Generate a deterministic investigation plan |
 | `POST` | `/api/v1/investigations/ai-plan` | Generate a provider-backed AI-style plan |
 | `POST` | `/api/v1/investigations/research` | Run bounded grounded research, evidence extraction, conflict detection, and summary |
@@ -1125,6 +1326,42 @@ alembic check
   offline mock pipeline (no model calls), its SQLite store is single-process,
   and its upload handling indexes plain text — it does not perform the heavy
   document extraction or AI evidence classification available under `/api/v1`.
+
+### Data persistence and backup (production deployment)
+
+Be explicit about what survives restarts before running a production deployment:
+
+- **SQL data survives** when PostgreSQL is used: users, investigations, audit
+  steps, sources, evidence items, conflicts, reports, and uploaded document
+  metadata/content persist in the relational database via
+  `PERSISTENCE_PROVIDER=sqlalchemy`. Back up the PostgreSQL volume or database
+  with your provider's standard tooling.
+- **RAG/vector data does not survive restarts yet.** The current
+  `InMemoryVectorStore` holds embeddings only in process memory; it is cleared
+  on restart and is not shared across workers. Persistent vector storage is a
+  future enhancement behind the existing `VectorStore` interface.
+- **Graph data does not survive restarts yet.** The current `InMemoryGraphStore`
+  is also process-local. Persistent graph storage is a future enhancement
+  behind the existing `GraphStore` interface.
+- **Document uploads survive** through the SQLAlchemy repository layer, which
+  doubles as the read source when the in-memory document store is empty.
+- Run the app with a single uvicorn worker so the process-local vector and graph
+  stores stay consistent. Multi-worker scaling requires persistent stores.
+
+### Known production caveats
+
+- The Content-Security-Policy includes `'unsafe-inline'` for `script-src` and
+  `style-src` to keep the CDN-based templates working; tightening it needs
+  nonces/hashes for inline scripts and is out of scope for this phase.
+- Rate limiting is documented but not implemented (see Production and
+  deployment); provider quota/retry behavior is unchanged.
+- No authentication or authorization layer exists; put the service behind an
+  authenticating reverse proxy for any public-facing deployment.
+- The agentic and research endpoints (`POST /api/v1/investigations/agentic`,
+  `/api/v1/investigations/research`, `POST /api/v1/research/web`) always use
+  Gemini grounded search and require `GEMINI_API_KEY`; the `SEARCH_PROVIDER`
+  environment variable does not change these endpoints. Other research entry
+  points (mock and deterministic web) remain available for offline work.
 
 ## Planned roadmap
 
