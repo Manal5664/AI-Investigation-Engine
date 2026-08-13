@@ -6,7 +6,13 @@
 
 An evidence-grounded AI investigation platform that researches claims, retrieves
 sources, extracts supporting and contradicting evidence, challenges conclusions,
-and preserves provenance.
+and preserves provenance — end to end, in the browser.
+
+### Try the live demo
+
+[![Live Demo](https://img.shields.io/badge/LIVE%20DEMO-Visit%20the%20app-009688?style=for-the-badge&logo=railway&logoColor=white)](https://ai-investigation-engine-production.up.railway.app/dashboard)
+
+`https://ai-investigation-engine-production.up.railway.app/dashboard`
 
 ![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.141-009688?logo=fastapi&logoColor=white)
@@ -14,11 +20,13 @@ and preserves provenance.
 ![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
 [![CI](https://github.com/Manal5664/AI-Investigation-Engine/actions/workflows/test.yml/badge.svg)](https://github.com/Manal5664/AI-Investigation-Engine/actions/workflows/test.yml)
 
+The public demo needs **no API key** and makes **no billable calls**.
+
 </div>
 
 ---
 
-## What EvidenceAI Does
+## Project overview
 
 EvidenceAI turns a question into a bounded, traceable investigation. Every step
 is typed, validated, and recorded so a reviewer can follow exactly which source
@@ -27,7 +35,7 @@ produced which passage of evidence.
 ```text
 Question
   → AI Investigation Plan
-  → Real/Configured Research Provider
+  → Research Provider (mock | Gemini)
   → Source Normalization
   → Evidence Extraction
   → Conflict Detection
@@ -47,23 +55,55 @@ integrations are opt-in and clearly labeled.
 
 ---
 
-## Screenshots
+## Live demo — Portfolio Demo Mode
 
-| Dashboard | New investigation | Investigation result |
-| --- | --- | --- |
-| ![dashboard](docs/screenshots/dashboard.png) | ![new-investigation](docs/screenshots/new-investigation.png) | ![investigation-result](docs/screenshots/investigation-result.png) |
+The public Railway deployment intentionally runs in **Portfolio Demo Mode**:
 
-| Documents | RAG search | Graph |
-| --- | --- | --- |
-| ![documents](docs/screenshots/documents.png) | ![rag-search](docs/screenshots/rag-search.png) | ![graph](docs/screenshots/graph.png) |
+- **Deterministic mock providers only** (`LLM_PROVIDER`, `SEARCH_PROVIDER`,
+  `EVIDENCE_PROVIDER`, `EMBEDDING_PROVIDER`, `GRAPH_EXTRACTION_PROVIDER`,
+  `VISION_PROVIDER` = `mock`; stores and persistence = `in_memory`).
+- **No paid Gemini or Google Search APIs are required** — nothing to configure,
+  nothing billable, nothing to leak.
+- **`.example` sources are synthetic demo sources, not real citations.** Every
+  response is labeled (`provider_used: "mock"`) so mock output is never mistaken
+  for a real citation.
+- **Real Gemini/provider integrations remain available in the architecture.**
+  Set `SEARCH_PROVIDER=gemini_grounded` plus a real `GEMINI_API_KEY` and the
+  same endpoints switch to live grounded search — no code change needed.
 
-Screenshots are not fabricated. Capture them from the offline demo
-(`docs/screenshots/README.md` explains exactly what to capture and how), then
-commit the PNG files under `docs/screenshots/`.
+See [docs/demo-mode.md](docs/demo-mode.md) for the full demo-mode configuration
+and the verified endpoint list.
 
 ---
 
-## Feature matrix
+## Key features
+
+- **Agentic investigation workflow** — a bounded, observable orchestrator
+  (planner → research → evidence → critic → synthesis) with a typed replay log
+  and no runaway tool loops.
+- **Evidence extraction with provenance** — verbatim passages keep source ID,
+  URL, hash, and extraction metadata; source credibility is scored heuristically
+  (never as truth).
+- **Conflict detection & Devil's Advocate** — surfaces supporting vs.
+  contradicting evidence and deliberately challenges the conclusion.
+- **RAG** — chunking, embedding, provenance-checked retrieval, duplicate-safe
+  indexing behind a `VectorStore` interface.
+- **GraphRAG** — entities/relations extracted from sources, stored in a graph,
+  and combined with vector retrieval during investigation.
+- **Multimodal documents** — PDF, DOCX, TXT/Markdown, and images via validated
+  uploads, page-preserving extraction, and a pluggable vision provider.
+- **Vendor-neutral LLM layer** — a single async provider contract with mock and
+  official Google Gemini adapters (planning, grounding, evidence, embeddings,
+  vision, graph).
+- **Production FastAPI engineering** — versioned `/api/v1`, strict Pydantic
+  schemas, typed errors, request IDs, structured logging, health/readiness
+  endpoints, env-based settings.
+- **Browser case workspace** — a dashboard, investigation, documents, RAG, and
+  graph UI reading live data from the same engine as the API.
+- **PostgreSQL persistence** — SQLAlchemy + Alembic behind a provider-neutral
+  repository interface, with an in-memory fallback for offline work.
+
+### Feature matrix
 
 | Feature | Status |
 | --- | --- |
@@ -88,7 +128,98 @@ commit the PNG files under `docs/screenshots/`.
 
 ---
 
-## Quick Start
+## Architecture
+
+The app is one FastAPI process that serves both the machine API (`/api/v1`) and
+the browser case workspace (`/dashboard`, `/investigate`, `/documents`,
+`/history`, `/rag`, `/graph`). Every provider sits behind a vendor-neutral
+interface so mock and Gemini implementations are interchangeable at startup via
+environment configuration.
+
+```mermaid
+flowchart LR
+    B["Browser / API client"] --> F["FastAPI (single process)"]
+    F --> A["Agentic investigation (bounded)"]
+    A --> R["Research / Evidence (mock | Gemini)"]
+    A --> K["RAG / GraphRAG (mock | Gemini embeddings)"]
+    F --> P["Persistence (in-memory | PostgreSQL)"]
+```
+
+Full diagrams (system, investigation pipeline, deployment):
+[docs/architecture.md](docs/architecture.md).
+
+### Project structure
+
+```text
+AI-Investigation-Engine/
+├── app/
+│   ├── agents/        Bounded agentic workflow (orchestrator, research,
+│   │                  evidence, critic, synthesis)
+│   ├── ai/            LLM provider contract, mock + Gemini, prompt builders
+│   ├── api/           FastAPI routers (/api/v1 machine API + UI routes)
+│   ├── research/      Search provider contract, mock + Gemini grounded search
+│   ├── evidence/      Evidence extraction providers (mock + Gemini)
+│   ├── rag/           Embeddings, chunker, vector store, retrieval
+│   ├── graph/         Graph store, builder, retriever, GraphRAG
+│   ├── documents/     Upload validation + PDF/DOCX/TXT/Image extraction
+│   ├── database/      Persistence (unit of work, repositories, ORM, Alembic)
+│   ├── services/      Application services (research, RAG, graph, documents)
+│   ├── schemas/       Strict Pydantic request/response models
+│   ├── static/        Browser UI CSS/JS
+│   ├── templates/     Browser UI Jinja2 templates
+│   └── tests/         Browser-UI HTTP tests
+├── tests/             Backend pytest suite (fully offline)
+├── alembic/           Relational schema migrations
+├── scripts/           Opt-in real-provider experiment scripts
+├── docs/              Architecture, API examples, demo mode, release checklist
+├── examples/          Fictional sample inputs (request JSON, TXT document)
+├── Dockerfile
+├── compose.yaml
+└── requirements.txt / requirements-dev.txt
+```
+
+---
+
+## Technology stack
+
+**Backend:** Python 3.12, FastAPI, Pydantic v2, uvicorn
+
+**AI:** google-genai (Gemini adapter), provider-neutral async contracts,
+deterministic mock providers
+
+**Retrieval:** chunking, embedding providers, cosine-similarity vector search
+(in-memory), knowledge-graph retrieval
+
+**Data:** SQLAlchemy 2, Alembic, psycopg (PostgreSQL), SQLite (local/testing)
+
+**Documents:** pypdf, python-docx, Pillow (image extraction + vision provider)
+
+**Frontend:** Jinja2 templates, vanilla JavaScript, Chart.js (CDN), Bootstrap
+
+**Testing:** pytest, httpx/TestClient, GitHub Actions CI
+
+**Deployment:** Docker, Docker Compose, Railway, healthcheck-ready image,
+non-root user
+
+---
+
+## Screenshots
+
+Screenshots are captured from the running app in offline demo mode — never
+fabricated. See [docs/screenshots/README.md](docs/screenshots/README.md) for
+exactly what to capture and how.
+
+| Dashboard | New investigation | Investigation result |
+| --- | --- | --- |
+| ![dashboard](docs/screenshots/dashboard.png) | ![new-investigation](docs/screenshots/new-investigation.png) | ![investigation-result](docs/screenshots/investigation-result.png) |
+
+| Documents | RAG search | Graph |
+| --- | --- | --- |
+| ![documents](docs/screenshots/documents.png) | ![rag-search](docs/screenshots/rag-search.png) | ![graph](docs/screenshots/graph.png) |
+
+---
+
+## Quick start
 
 Requirements: Python 3.12, or Docker. No API key is required for the demo.
 
@@ -141,151 +272,55 @@ curl -X POST http://127.0.0.1:8000/api/v1/rag/search `
 
 ---
 
-## Demo mode
+## Testing
 
-`examples/demo.env` is a committed, safe configuration:
+The suite runs fully offline (in-memory persistence and mock providers):
 
-- No Gemini API key — nothing to leak and nothing billable.
-- Deterministic mock providers only (`LLM_PROVIDER`, `SEARCH_PROVIDER`,
-  `EVIDENCE_PROVIDER`, `EMBEDDING_PROVIDER`, `GRAPH_EXTRACTION_PROVIDER`,
-  `VISION_PROVIDER` = `mock`; stores and persistence = `in_memory`).
-- Results carry `provider_used` / `model_used` labels so mock output is never
-  mistaken for a real citation.
-
-**Demo-mode behavior:** the agentic, end-to-end research, web-research, and UI
-"Run investigation" endpoints are fully wired to `SEARCH_PROVIDER`. In demo
-mode that is `mock`, so `POST /api/v1/investigations/agentic`,
-`POST /api/v1/investigations/research`, `POST /api/v1/research/web`, and the UI
-"Run investigation" button run offline and return clearly labeled `*.example`
-sources. Set `SEARCH_PROVIDER=gemini_grounded` (plus a real `GEMINI_API_KEY`)
-to switch those endpoints to live grounded search; no code change is needed.
-`POST /api/v1/research/mock` remains the explicit offline-only pipeline.
-
-Full details: [docs/demo-mode.md](docs/demo-mode.md).
-
----
-
-## Architecture
-
-- [docs/architecture.md](docs/architecture.md) — Mermaid diagrams for the
-  high-level system, the investigation pipeline, and deployment.
-
-Highlights:
-
-```mermaid
-flowchart LR
-    B["Browser / API client"] --> F["FastAPI (single process)"]
-    F --> A["Agentic investigation (bounded)"]
-    A --> R["Research / Evidence (mock | Gemini)"]
-    A --> K["RAG / GraphRAG (mock | Gemini embeddings)"]
-    F --> P["Persistence (in-memory | PostgreSQL)"]
+```powershell
+python -m pytest -q
+python -m compileall app
+python -m pip check
 ```
 
-The app is one FastAPI process that serves both the machine API (`/api/v1`) and
-the browser case workspace (`/dashboard`, `/investigate`, `/documents`,
-`/history`, `/rag`, `/graph`). Every provider is behind a vendor-neutral
-interface so mock and Gemini implementations are interchangeable.
+Current verified suite: **199 passing tests** across providers, services, the
+API, persistence, RAG, graph, documents, and the browser UI. Run
+`python -m pytest -q` for the current count.
 
----
+Migration consistency can be checked with:
 
-## Project structure
-
-```text
-AI-Investigation-Engine/
-├── app/
-│   ├── agents/        Bounded agentic workflow (orchestrator, research,
-│   │                  evidence, critic, synthesis)
-│   ├── ai/            LLM provider contract, mock + Gemini, prompt builders
-│   ├── api/           FastAPI routers (/api/v1 machine API + UI routes)
-│   ├── research/      Search provider contract, mock + Gemini grounded search
-│   ├── evidence/      Evidence extraction providers (mock + Gemini)
-│   ├── rag/           Embeddings, chunker, vector store, retrieval
-│   ├── graph/         Graph store, builder, retriever, GraphRAG
-│   ├── documents/     Upload validation + PDF/DOCX/TXT/Image extraction
-│   ├── database/      Persistence (unit of work, repositories, ORM, Alembic)
-│   ├── services/      Application services (research, RAG, graph, documents)
-│   ├── schemas/       Strict Pydantic request/response models
-│   ├── static/        Browser UI CSS/JS
-│   ├── templates/     Browser UI Jinja2 templates
-│   └── tests/         Browser-UI HTTP tests
-├── tests/             Backend pytest suite (fully offline)
-├── alembic/           Relational schema migrations
-├── scripts/           Opt-in real-provider experiment scripts
-├── docs/              Architecture, API examples, demo mode, release checklist
-├── examples/          Fictional sample inputs (request JSON, TXT document)
-├── Dockerfile
-├── compose.yaml
-└── requirements.txt / requirements-dev.txt
+```powershell
+$env:DATABASE_URL="sqlite:///./ai_investigation.db"
+alembic upgrade head
+alembic check
 ```
 
 ---
 
-## Technology stack
+## Deployment
 
-**Backend:** Python 3.12, FastAPI, Pydantic v2, uvicorn
+Production requires `ENVIRONMENT=production`, `PERSISTENCE_PROVIDER=sqlalchemy`
+with a PostgreSQL `DATABASE_URL`, and `GEMINI_API_KEY` when a Gemini provider is
+selected. The startup validation fails fast otherwise.
 
-**AI:** google-genai (Gemini adapter), provider-neutral async contracts,
-deterministic mock providers
+```powershell
+docker build -t evidenceai .
+docker run -d -p 8000:8000 `
+  -e ENVIRONMENT=production `
+  -e PERSISTENCE_PROVIDER=sqlalchemy `
+  -e DATABASE_URL="postgresql+psycopg://investigator:PASSWORD@dbhost:5432/ai_investigation" `
+  -e GEMINI_API_KEY="<your-key>" `
+  evidenceai
+```
 
-**Retrieval:** chunking, embedding providers, cosine-similarity vector search
-(in-memory), knowledge-graph retrieval
+Or with the full local stack:
 
-**Data:** SQLAlchemy 2, Alembic, psycopg (PostgreSQL), SQLite (local/testing)
+```powershell
+docker compose up --build
+```
 
-**Documents:** pypdf, python-docx, Pillow (image extraction + vision provider)
-
-**Frontend:** Jinja2 templates, vanilla JavaScript, Chart.js (CDN), Bootstrap
-
-**Testing:** pytest, httpx/TestClient, GitHub Actions CI
-
-**Deployment:** Docker, Docker Compose, healthcheck-ready image, non-root user
-
----
-
-## API examples
-
-Curated curl examples for health, planning, agentic investigation, documents,
-RAG search, and graph query are in [docs/api-examples.md](docs/api-examples.md).
-Sample inputs live in [`examples/`](examples/):
-
-- `examples/investigation-request.json` — a planning request
-- `examples/sample-document.txt` — a small fictional TXT document
-- `examples/api-request.json` — an agentic request
-- `examples/demo.env` — the offline demo configuration
-
-All sample data is fictional or public-domain style; nothing copyrighted or
-confidential.
-
----
-
-## What This Project Demonstrates
-
-- **Production FastAPI engineering** — versioned API, strict schemas, typed
-  errors, request IDs, structured logging, health/readiness endpoints, env-based
-  settings without `pydantic-settings`.
-- **LLM integration** — a vendor-neutral async provider contract with mock and
-  official Google Gemini adapters, shared prompt builders, and schema-validated
-  output with explicit fallback metadata.
-- **RAG** — chunking, embedding, provenance-checked retrieval, and
-  duplicate-safe indexing behind a `VectorStore` interface.
-- **GraphRAG** — entities/relations extracted from sources, stored in a graph,
-  and combined with vector retrieval during investigation.
-- **Agentic workflows** — a bounded, observable orchestrator (planner →
-  research → evidence → critic → synthesis) with a typed replay log and no
-  runaway tool loops.
-- **Multimodal document processing** — PDF, DOCX, TXT/Markdown, and images
-  through validated uploads, page-preserving extraction, and a pluggable vision
-  provider.
-- **Structured evidence provenance** — every evidence item keeps its source ID,
-  URL, verbatim passage, hash, and extraction metadata.
-- **PostgreSQL persistence** — SQLAlchemy + Alembic behind a provider-neutral
-  repository interface, with in-memory fallback for offline work.
-- **Docker** — slim non-root image, healthchecks, and a compose stack with a
-  one-shot migration service.
-- **Testing** — an offline pytest suite across providers, services, API, and
-  the browser UI, enforced in CI.
-- **Frontend integration** — a browser case workspace reading live data from the
-  same engine as the API.
+The public deployment runs on Railway in Portfolio Demo Mode (see above).
+Health endpoints: `GET /health`, `GET /health/live`, `GET /health/ready`.
+Health responses never expose secrets or the full `DATABASE_URL`.
 
 ---
 
@@ -345,59 +380,32 @@ EvidenceAI makes no claim of third-party security certification.
 - Rate limiting is documented but not implemented.
 - The SQLAlchemy session layer is synchronous (runs on worker threads) and has
   not been benchmarked under high concurrency.
-
-Full details in the [original limitations notes](#limitations-detail).
-
----
-
-## Testing
-
-The suite runs fully offline (in-memory persistence and mock providers):
-
-```powershell
-python -m pytest -q
-python -m compileall app
-python -m pip check
-```
-
-As of the writing of this phase, the verified suite has **199 passing tests**
-across providers, services, the API, persistence, RAG, graph, documents, and
-the browser UI. Run `python -m pytest -q` for the current count.
-
-Migration consistency can be checked with:
-
-```powershell
-$env:DATABASE_URL="sqlite:///./ai_investigation.db"
-alembic upgrade head
-alembic check
-```
+- `InMemoryVectorStore` / `InMemoryGraphStore` / `InMemoryDocumentStore` are
+  process-local, cleared on restart, and not shared across workers. SQL data
+  survives when PostgreSQL is used; RAG and graph data do not yet.
+- No Pinecone, Chroma, Qdrant, FAISS, Neo4j, or persistent GraphRAG integration.
+- Category detection uses local pattern matching, not a trained model.
+- Mock search uses deterministic records on reserved `*.example` domains and is
+  never substituted after a real search failure.
+- The browser UI is a local case workspace; its heavy document extraction and
+  AI evidence classification run under `/api/v1`, and the UI "Run investigation"
+  action uses the `SEARCH_PROVIDER` configured at startup.
 
 ---
 
-## Deployment
+## API examples
 
-Production requires `ENVIRONMENT=production`, `PERSISTENCE_PROVIDER=sqlalchemy`
-with a PostgreSQL `DATABASE_URL`, and `GEMINI_API_KEY` when a Gemini provider is
-selected. The startup validation fails fast otherwise.
+Curated curl examples for health, planning, agentic investigation, documents,
+RAG search, and graph query are in [docs/api-examples.md](docs/api-examples.md).
+Sample inputs live in [`examples/`](examples/):
 
-```powershell
-docker build -t evidenceai .
-docker run -d -p 8000:8000 `
-  -e ENVIRONMENT=production `
-  -e PERSISTENCE_PROVIDER=sqlalchemy `
-  -e DATABASE_URL="postgresql+psycopg://investigator:PASSWORD@dbhost:5432/ai_investigation" `
-  -e GEMINI_API_KEY="<your-key>" `
-  evidenceai
-```
+- `examples/investigation-request.json` — a planning request
+- `examples/sample-document.txt` — a small fictional TXT document
+- `examples/api-request.json` — an agentic request
+- `examples/demo.env` — the offline demo configuration
 
-Or with the full local stack:
-
-```powershell
-docker compose up --build
-```
-
-Health endpoints: `GET /health`, `GET /health/live`, `GET /health/ready`.
-Health responses never expose secrets or the full `DATABASE_URL`.
+All sample data is fictional or public-domain style; nothing copyrighted or
+confidential.
 
 ---
 
@@ -411,29 +419,10 @@ and add a `LICENSE` file before publishing as open source.
 ## Versioning
 
 The application version lives in `APP_VERSION` (default `0.6.0` in
-`app/core/config.py` and `.env.example`). Phase 13 adds documentation,
-packaging, and demo configuration only — no backend features — so no version
-bump is required. Note that a project-root `.env` overrides the default at
-runtime: the committed files say `0.6.0`, while a local `.env` pinned to `0.5.0`
-will win. Reserve a bump for the next feature phase; the decision is yours.
+`app/core/config.py` and `.env.example`). Note that a project-root `.env`
+overrides the default at runtime: the committed files say `0.6.0`, while a local
+`.env` pinned to `0.5.0` will win.
 
 ## Release checklist
 
 See [docs/release-checklist.md](docs/release-checklist.md).
-
----
-
-## Limitations detail
-
-- `InMemoryVectorStore` / `InMemoryGraphStore` / `InMemoryDocumentStore` are
-  process-local, cleared on restart, and not shared across workers. SQL data
-  survives when PostgreSQL is used; RAG and graph data do not yet.
-- The SQLAlchemy session layer runs on worker threads and has not been
-  benchmarked under high concurrency.
-- No Pinecone, Chroma, Qdrant, FAISS, Neo4j, or persistent GraphRAG integration.
-- Category detection uses local pattern matching, not a trained model.
-- Mock search uses deterministic records on reserved `*.example` domains and is
-  never substituted after a real search failure.
-- The browser UI is a local case workspace; its heavy document extraction and
-  AI evidence classification run under `/api/v1`, and the UI "Run investigation"
-  action uses the `SEARCH_PROVIDER` configured at startup.
