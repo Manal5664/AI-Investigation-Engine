@@ -81,7 +81,7 @@ async def run_mock_research(request: ResearchRequest) -> ResearchResult:
 async def run_web_research(
     request: WebResearchRequest,
 ) -> WebResearchResult:
-    provider = create_search_provider("gemini_grounded")
+    provider = create_search_provider()
     configured_max_results = min(
         request.max_results,
         settings.SEARCH_MAX_RESULTS,

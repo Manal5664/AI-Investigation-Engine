@@ -450,7 +450,7 @@ async def dashboard_data():
 
 @router.post("/api/investigations/run", include_in_schema=False)
 async def run_investigation(request: AgenticInvestigationRequest):
-    search_provider = create_search_provider("gemini_grounded")
+    search_provider = create_search_provider()
     evidence_extractor = None
     embedding_provider = None
     graph_extraction_provider = None

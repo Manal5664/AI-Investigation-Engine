@@ -125,7 +125,7 @@ async def create_ai_investigation_plan(
 async def research_investigation(
     request: InvestigationResearchRequest,
 ) -> InvestigationResearchResponse:
-    search_provider = create_search_provider("gemini_grounded")
+    search_provider = create_search_provider()
     evidence_extractor = None
     try:
         evidence_extractor = create_evidence_extractor()
@@ -161,7 +161,7 @@ async def research_investigation(
 async def run_agentic_investigation(
     request: AgenticInvestigationRequest,
 ) -> AgenticInvestigationResult:
-    search_provider = create_search_provider("gemini_grounded")
+    search_provider = create_search_provider()
     evidence_extractor = None
     embedding_provider = None
     graph_extraction_provider = None

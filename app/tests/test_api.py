@@ -11,12 +11,14 @@ Run with:
 import asyncio
 import itertools
 import re
+from dataclasses import replace
 from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import settings
 from app.database.provider import get_persistence_provider, reset_persistence
 from app.documents.factory import get_document_store
 from app.evidence.mock_extractor import MockEvidenceExtractor
@@ -531,6 +533,25 @@ def test_run_investigation_returns_id_and_persists(client):
     detail = client.get(f"/api/v1/investigations/{payload['investigation_id']}")
     assert detail.status_code == 200
     assert detail.json()["report"] is not None
+
+
+def test_run_investigation_uses_configured_search_provider(client):
+    with (
+        patch(
+            "app.research.search.factory.GeminiGroundedSearchProvider",
+        ) as gemini_cls,
+        patch(
+            "app.research.search.factory.settings",
+            replace(settings, SEARCH_PROVIDER="mock"),
+        ),
+    ):
+        res = client.post("/api/investigations/run", json=agentic_body())
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["investigation_id"].startswith("inv-")
+    assert payload["status"] in {"completed", "partial", "failed"}
+    gemini_cls.assert_not_called()
 
 
 def test_run_investigation_requires_query(client):

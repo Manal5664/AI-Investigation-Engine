@@ -1,0 +1,26 @@
+AURORA MICROGRID - DRAFT MAINTENANCE MANUAL (sample)
+
+This document is entirely fictional. It is provided as a sample input for the
+EvidenceAI document pipeline. The company, product, and facts below do not
+exist.
+
+Section 1 - Overview
+Aurora Microgrid (fictional) publishes the "GridSafe 200", a grid-scale
+battery unit designed for island microgrids. This draft manual describes
+scheduled maintenance only and does not list any third-party safety
+certification, such as UL, IEC, or equivalent marks.
+
+Section 2 - Maintenance schedule
+The draft recommends a visual inspection every 90 days, a thermal scan every
+six months, and a full capacity test every 12 months. The manual does not
+specify a replacement interval for the cooling fans.
+
+Section 3 - Known review findings
+An internal engineering review of the draft raised two concerns: the operating
+temperature range in Section 6 conflicts with the range printed on the unit
+label, and the emergency shutdown procedure references an outdated firmware
+version.
+
+Section 4 - References
+The manual references no external standards bodies. Reviewers noted that
+independent certification documentation was not included with the draft.

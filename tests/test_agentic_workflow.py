@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -12,6 +13,7 @@ from app.agents.critic_agent import CriticAgent
 from app.agents.evidence_agent import EvidenceAgent
 from app.agents.orchestrator import InvestigationOrchestrator
 from app.agents.research_agent import ResearchAgent
+from app.core.config import settings
 from app.evidence.base import EvidenceProviderError
 from app.evidence.mock_extractor import MockEvidenceExtractor
 from app.graph.models import (
@@ -760,4 +762,123 @@ def test_agentic_api_use_rag_true_uses_offline_rag_flow() -> None:
     assert evidence["provenance"]["source_id"] == "source-001"
     assert evidence["provenance"]["source_url"] == (
         "https://supporting.example/report"
+    )
+
+
+def test_agentic_api_defers_provider_choice_to_configuration() -> None:
+    recorded: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def spy_factory(*args: Any, **kwargs: Any) -> SearchProvider:
+        recorded.append((args, kwargs))
+        return ScriptedSearchProvider([[SUPPORTING]])
+
+    evidence_extractor = MockEvidenceExtractor()
+
+    async def make_request() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            return await client.post(
+                "/api/v1/investigations/agentic",
+                json=_request(run_critic=False).model_dump(mode="json"),
+            )
+
+    with (
+        patch(
+            "app.api.v1.routes.create_search_provider",
+            side_effect=spy_factory,
+        ),
+        patch(
+            "app.api.v1.routes.create_evidence_extractor",
+            return_value=evidence_extractor,
+        ),
+    ):
+        response = asyncio.run(make_request())
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+    assert recorded, "create_search_provider was never called by the route"
+    args, kwargs = recorded[0]
+    assert args == ()
+    assert "provider_name" not in kwargs
+
+
+def test_agentic_api_runs_offline_with_mock_config_and_never_builds_gemini() -> None:
+    async def make_request() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            return await client.post(
+                "/api/v1/investigations/agentic",
+                json=_request(run_critic=False).model_dump(mode="json"),
+            )
+
+    with (
+        patch(
+            "app.research.search.factory.GeminiGroundedSearchProvider",
+        ) as gemini_cls,
+        patch(
+            "app.research.search.factory.settings",
+            replace(settings, SEARCH_PROVIDER="mock"),
+        ),
+    ):
+        response = asyncio.run(make_request())
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "completed"
+    assert (
+        payload["state"]["question_results"][0]["research"]["provider_used"]
+        == "mock"
+    )
+    gemini_cls.assert_not_called()
+
+
+def test_agentic_api_surfaces_configured_gemini_rate_limit_without_mock_fallback() -> None:
+    rate_limit = SearchProviderRateLimitError(
+        provider="gemini_grounded",
+        model="mocked-grounded-model",
+        retry_after_seconds=9,
+    )
+    search_provider = ScriptedSearchProvider([rate_limit])
+    evidence_extractor = MockEvidenceExtractor()
+
+    async def make_request() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            return await client.post(
+                "/api/v1/investigations/agentic",
+                json=_request(
+                    max_sub_questions=2,
+                    max_critic_rounds=2,
+                ).model_dump(mode="json"),
+            )
+
+    with (
+        patch(
+            "app.api.v1.routes.create_search_provider",
+            return_value=search_provider,
+        ),
+        patch(
+            "app.api.v1.routes.create_evidence_extractor",
+            return_value=evidence_extractor,
+        ),
+    ):
+        response = asyncio.run(make_request())
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "failed"
+    assert payload["state"]["errors"][0]["error_type"] == "rate_limit"
+    assert payload["state"]["errors"][0]["retry_after_seconds"] == 9
+    assert len(search_provider.calls) == 1
+    assert "No mock sources were substituted" in (
+        payload["state"]["critic_result"]["finding_summary"]
     )
